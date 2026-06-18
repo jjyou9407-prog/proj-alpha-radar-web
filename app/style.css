@@ -1,0 +1,52 @@
+*{box-sizing:border-box}
+body{margin:0;background:#07090c;color:#eaecef;font-family:Arial,'Apple SD Gothic Neo','Malgun Gothic',sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:24px}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+.brand h1{margin:0;font-size:30px;color:#f0b90b}
+.brand p{margin:6px 0 0;color:#9aa4ad}
+.badge{background:#15191f;border:1px solid #2b3139;border-radius:999px;padding:8px 12px;color:#f0b90b}
+.grid{display:grid;grid-template-columns:1.4fr 1fr;gap:16px}
+.card{background:#111418;border:1px solid #252b33;border-radius:18px;padding:18px;box-shadow:0 14px 40px rgba(0,0,0,.45)}
+.card h2{margin:0 0 14px;font-size:20px}
+.tabs{display:flex;gap:8px;margin-bottom:12px}
+.tab{border:1px solid #2b3139;background:#181d23;color:#eaecef;border-radius:999px;padding:8px 12px}
+.rank{display:grid;grid-template-columns:42px 1fr 70px 90px;gap:10px;align-items:center;padding:12px;border-radius:14px;background:#13181d;margin-bottom:8px;border:1px solid #252b33}
+.rank strong{font-size:18px}
+.score{font-weight:800;color:#0ecb81}
+.pill{font-size:12px;border-radius:999px;padding:5px 8px;background:#18212a;color:#d5dbe1;text-align:center}
+.detail{margin-top:12px;padding:14px;border-radius:14px;background:#0f1317;border:1px solid #252b33}
+.detail h3{margin:0 0 8px}
+.nums{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.num{background:#181d23;border:1px solid #252b33;border-radius:12px;padding:10px}
+.num span{display:block;color:#8f9aa5;font-size:12px}
+.num b{font-size:16px}
+.list{display:flex;flex-direction:column;gap:10px}
+.item{background:#12171d;border:1px solid #252b33;border-radius:14px;padding:12px}
+.item b{display:block;margin-bottom:4px}
+.muted{color:#9aa4ad}
+.warn{background:#1a1313;border:1px solid #5a2c2c}
+.good{background:#141a17;border:1px solid #2f4d3b}
+.footer{margin-top:20px;color:#747f8a;font-size:13px}
+
+@media(max-width:850px){
+  .grid{grid-template-columns:1fr}
+  .nums{grid-template-columns:repeat(2,1fr)}
+  .rank{grid-template-columns:34px 1fr 56px}
+  .rank .pill{display:none}
+  .wrap{padding:14px}
+  .brand h1{font-size:24px}
+}
+.list .card{
+  background:#0b0e11 !important;
+  border:1px solid #30363d !important;
+}
+
+.list .item{
+  background:#1e2329 !important;
+  border:1px solid #3a424c !important;
+}
+
+.list .item.warn{
+  background:#231516 !important;
+  border:1px solid #7a2e2e !important;
+}
