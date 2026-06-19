@@ -1,0 +1,21 @@
+Alpha Radar AI v3.0 Beginner Profit Mode
+
+업그레이드 내용
+- 초보자 모드 ON/OFF 추가
+- TOP7을 단순 점수순이 아니라 진입 타이밍 점수 기준으로 정렬 가능
+- 매수금지 종목 자동 제외
+- 종목별 오늘 행동 카드 추가
+- 1차 매수/2차 매수/손절/1차 목표/최종 목표 자동 계산
+- 예상수익/예상손실/손익비 자동 계산
+- 과열 감점/타이밍 점수 추가
+- 매수금지 조건 표시
+- 포트폴리오 AI 재평가 강화
+- Supabase 3분 자동 갱신
+- 미국 종목 TradingView NYSE/NASDAQ 매핑 일부 강화
+
+검증
+- npm install 완료
+- npm run build 성공
+
+주의
+- .env.local은 보안 때문에 압축파일에서 제외함. 기존 폴더의 .env.local은 유지해야 함.

@@ -47,6 +47,8 @@ const demo: Stock[] = [
 
 function tvSymbol(s: Stock) {
   if (s.market === 'KR') return `KRX:${s.symbol}`;
+  const nyse = ['BA','CAT','CRM','CVX','DE','DIS','ETN','GE','GEV','GS','HD','JPM','LLY','LMT','MA','NOC','NVO','ORCL','RTX','SHOP','SNOW','TSM','UBER','V','VRT','WMT','XOM'];
+  if (nyse.includes(s.symbol.toUpperCase())) return `NYSE:${s.symbol}`;
   return `NASDAQ:${s.symbol}`;
 }
 
@@ -56,6 +58,138 @@ function naverLink(s: Stock) {
 
 function tradingViewLink(s: Stock) {
   return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol(s))}`;
+}
+
+
+function safePrice(value: number, fallback: number) {
+  if (Number.isFinite(value) && value > 0) return value;
+  return fallback;
+}
+
+function parsePercent(text?: string) {
+  if (!text) return 0;
+  const cleaned = String(text).replace('%', '').replace('+', '').replace(',', '.').trim();
+  const value = Number(cleaned);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function getTradePlan(stock: Stock) {
+  const price = safePrice(stock.price, 0);
+  const entry1 = safePrice(stock.entry_price, price * 0.985);
+
+  // v3.3 핵심 수정:
+  // 1차/2차/3차 분할매수 구조에서는 손절가가 3차 매수가보다 반드시 아래여야 한다.
+  // 이전 버전은 Supabase stop_price를 그대로 써서 3차 매수가보다 손절가가 위에 표시되는 문제가 있었다.
+  const entry2 = stock.market === 'KR' ? entry1 * 0.97 : entry1 * 0.965;
+  const entry3 = stock.market === 'KR' ? entry1 * 0.94 : entry1 * 0.93;
+
+  const rawStop = safePrice(stock.stop_price, entry1 * 0.88);
+  const stopBuffer = stock.market === 'KR' ? 0.965 : 0.96;
+  const maxAllowedStop = entry3 * stopBuffer;
+  const minAllowedStop = entry1 * 0.78;
+  const stop = Math.max(Math.min(rawStop, maxAllowedStop), minAllowedStop);
+
+  const target1 = safePrice(stock.target_price, entry1 * 1.08);
+  const target2 = target1 * 1.045;
+  const upside = entry1 > 0 ? ((target1 - entry1) / entry1) * 100 : 0;
+  const downside = entry1 > 0 ? ((entry1 - stop) / entry1) * 100 : 0;
+  const rr = downside > 0 ? upside / downside : 0;
+  const currentPremium = entry1 > 0 ? ((price - entry1) / entry1) * 100 : 0;
+  const targetGap = price > 0 ? ((target1 - price) / price) * 100 : 0;
+  const dayMove = parsePercent(stock.change_text);
+  const overheatingPenalty = Math.round(
+    clamp(Math.max(dayMove - 4, 0) * 2 + Math.max(currentPremium - 3, 0) * 3 + Math.max(6 - targetGap, 0) * 2, 0, 25)
+  );
+  const timingScore = clamp(Math.round(stock.score - overheatingPenalty + Math.min(rr, 3) * 4), 0, 100);
+  const adjustedStop = rawStop !== stop;
+  return { price, entry1, entry2, entry3, stop, rawStop, adjustedStop, target1, target2, upside, downside, rr, currentPremium, targetGap, dayMove, overheatingPenalty, timingScore };
+}
+
+function getSignal(stock: Stock) {
+  const p = getTradePlan(stock);
+  const riskText = String(stock.risk_level ?? '').toLowerCase();
+  const highRisk = riskText.includes('높') || riskText.includes('high');
+  const danger = stock.score < 60 || p.rr < 1 || p.downside > 16 || p.targetGap < 3 || p.currentPremium > 8 || p.dayMove > 10 || highRisk;
+  if (danger) {
+    return { label: '🔴 매수금지', tone: 'danger', summary: '지금은 초보자가 따라가기 위험한 자리입니다.' };
+  }
+  if (stock.score >= 88 && p.timingScore >= 82 && p.rr >= 1.5) {
+    return { label: '🔥 적극관심', tone: 'hot', summary: '단, 한 번에 몰빵 금지. 1차만 작게 들어가는 자리입니다.' };
+  }
+  if (stock.score >= 75 && p.timingScore >= 70 && p.rr >= 1.25) {
+    return { label: '🟢 매수가능', tone: 'good', summary: '분할매수 기준으로 접근 가능한 자리입니다.' };
+  }
+  if (stock.score >= 65) {
+    return { label: '🟡 대기', tone: 'wait', summary: '종목은 괜찮지만 진입 타이밍은 조금 더 기다리는 쪽입니다.' };
+  }
+  return { label: '⚪ 관찰', tone: 'neutral', summary: '관심종목에 두고 점수와 가격 변화를 더 확인하세요.' };
+}
+
+function formatPct(n: number) {
+  if (!Number.isFinite(n)) return '-';
+  return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+}
+
+function planClassName(tone: string) {
+  if (tone === 'danger') return 'item warn';
+  if (tone === 'hot' || tone === 'good') return 'item good';
+  return 'item';
+}
+
+function ActionPlanCard({ stock, fmt }: { stock: Stock; fmt: (n: number, m: string) => string; }) {
+  const plan = getTradePlan(stock);
+  const signal = getSignal(stock);
+  const forbid: string[] = [];
+  if (plan.currentPremium > 8) forbid.push('현재가가 1차 진입가보다 많이 높음: 추격매수 금지');
+  if (plan.targetGap < 3) forbid.push('목표가와 너무 가까움: 상승여력 부족');
+  if (plan.dayMove > 10) forbid.push('하루 급등폭 과다: 다음 눌림목 대기');
+  if (plan.downside > 16) forbid.push('손절폭이 16% 이상: 초보자에게 위험');
+  if (plan.rr < 1.2) forbid.push('손익비가 낮음: 벌 자리보다 잃을 자리가 큼');
+  if (stock.score < 60) forbid.push('AI 점수 60점 미만: 우선순위 낮음');
+  const beginnerBudget = stock.market === 'KR' ? '10만원' : '$100';
+
+  return (
+    <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
+      <div className={planClassName(signal.tone)}>
+        <b>🚦 지금 신호: {signal.label}</b>
+        <span className="muted">타이밍 점수 {plan.timingScore}점 · 과열 감점 -{plan.overheatingPenalty}점 · {signal.summary}</span>
+      </div>
+
+      <div className="item good">
+        <b>🎯 오늘 행동</b>
+        <span className="muted">1차 매수: {fmt(plan.entry1, stock.market)} 이하</span>
+        <span className="muted">2차 매수: {fmt(plan.entry2, stock.market)} 근처</span>
+        <span className="muted">3차 매수: {fmt(plan.entry3, stock.market)} 근처</span>
+        <span className="muted">손절: {fmt(plan.stop, stock.market)} 종가 이탈 시 정리</span>
+        {plan.adjustedStop && <span className="muted">※ 3차 매수가보다 아래로 자동 보정됨</span>}
+        <span className="muted">1차 목표: {fmt(plan.target1, stock.market)} · 최종 목표: {fmt(plan.target2, stock.market)}</span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <div className="num"><span>예상수익</span><b style={{ color: '#22c55e' }}>{formatPct(plan.upside)}</b></div>
+        <div className="num"><span>예상손실</span><b style={{ color: '#ef4444' }}>-{plan.downside.toFixed(1)}%</b></div>
+        <div className="num"><span>손익비</span><b>{plan.rr ? `${plan.rr.toFixed(2)} : 1` : '-'}</b></div>
+      </div>
+
+      <div className="item">
+        <b>👶 초보자 따라하기</b>
+        <span className="muted">{beginnerBudget} 기준: 1차 30%, 2차 30%, 3차 40%만 사용. 몰빵 금지.</span>
+        <span className="muted">손절은 장중 터치가 아니라 종가 이탈 기준으로 판단. 단, 악재 뉴스가 터지면 예외.</span>
+        <span className="muted">1차 목표 도달 시 절반 익절, 나머지는 본전 이상에서 관리.</span>
+      </div>
+
+      <div className={forbid.length ? 'item warn' : 'item good'}>
+        <b>{forbid.length ? '🚫 매수금지 조건' : '✅ 초보자 진입 체크'}</b>
+        {(forbid.length ? forbid : ['현재 기준 큰 금지 조건은 없음. 그래도 1차 소액 분할만 권장.']).map((x) => (
+          <span className="muted" key={x}>• {x}</span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function TradingViewUSChart({ stock }: { stock: Stock }) {
@@ -274,9 +408,12 @@ function PortfolioPanel({ stocks, fmt }: { stocks: Stock[]; fmt: (n: number, m: 
 
   const portfolioDecision = (stock: Stock | undefined, pnlPct: number) => {
     if (!stock) return '데이터 대기';
-    if (pnlPct <= -8 && stock.score < 70) return '손절 검토';
-    if (pnlPct >= 15 && stock.score < 75) return '분할익절 검토';
-    if (stock.score >= 85) return '강한 보유';
+    const signal = getSignal(stock);
+    const plan = getTradePlan(stock);
+    if (pnlPct <= -8 && (stock.score < 70 || signal.tone === 'danger')) return '손절/비중축소 우선';
+    if (pnlPct >= 15 && plan.targetGap < 5) return '절반 익절 유리';
+    if (pnlPct >= 10 && signal.tone === 'danger') return '수익 보호 우선';
+    if (stock.score >= 85 && signal.tone !== 'danger') return '강한 보유';
     if (stock.score >= 70) return '보유 우위';
     if (stock.score >= 60) return '주의 관찰';
     return '비중 축소 검토';
@@ -442,6 +579,8 @@ export default function Page() {
   const [mode, setMode] = useState(hasSupabase ? 'Cloud 연결' : 'Demo 모드');
   const [query, setQuery] = useState('');
   const [watchSymbols, setWatchSymbols] = useState<string[]>([]);
+  const [beginnerMode, setBeginnerMode] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<string>('');
 
   useEffect(() => {
     try {
@@ -455,9 +594,9 @@ export default function Page() {
   }, [watchSymbols]);
 
   useEffect(() => {
-    async function load() {
+    async function load(keepSelection = false) {
       if (!hasSupabase || !supabase) return;
-      const { data, error } = await supabase.from('rankings').select('*').order('score', { ascending: false }).limit(30);
+      const { data, error } = await supabase.from('rankings').select('*').order('score', { ascending: false }).limit(120);
       if (error) {
         console.error('Supabase rankings load error:', error);
         setMode('Supabase 오류');
@@ -465,25 +604,49 @@ export default function Page() {
       }
       if (data && data.length) {
         const mapped = data.map((r: any) => ({
-          symbol: r.symbol, name: r.name, market: r.market, score: Number(r.score ?? 0), grade: r.grade ?? 'C',
+          symbol: String(r.symbol ?? '').trim(), name: String(r.name ?? '').trim(), market: String(r.market ?? '').trim().toUpperCase(), score: Number(r.score ?? 0), grade: r.grade ?? 'C',
           price: Number(r.price ?? 0), entry_price: Number(r.entry_price ?? 0), stop_price: Number(r.stop_price ?? 0), target_price: Number(r.target_price ?? 0),
           reason: r.reason ?? '', beginner_note: r.beginner_note ?? '', change_text: r.change_text ?? '관찰', decision: r.decision ?? '관망', risk_level: r.risk_level ?? '보통', action_text: r.action_text ?? '추가 확인 필요',
           trend_score: Number(r.trend_score ?? 0), volume_score: Number(r.volume_score ?? 0), news_score: Number(r.news_score ?? 0), earnings_score: Number(r.earnings_score ?? 0), flow_score: Number(r.flow_score ?? 0), risk_score: Number(r.risk_score ?? 0),
         }));
         setStocks(mapped);
-        setSel(mapped[0]);
+        setSel((prev) => {
+          if (!keepSelection) return mapped[0];
+          return mapped.find((x: Stock) => x.market === prev.market && x.symbol === prev.symbol) ?? mapped[0];
+        });
         setMode('Supabase 실시간 연결');
+        setLastUpdated(new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }));
       }
     }
-    load();
+    load(false);
+    const timer = setInterval(() => load(true), 180000);
+    return () => clearInterval(timer);
   }, []);
 
-  const filtered = stocks.filter((s) => tab === 'ALL' || s.market === tab).sort((a, b) => b.score - a.score).slice(0, 7);
+  const marketCounts = useMemo(() => ({
+    ALL: stocks.length,
+    US: stocks.filter((s) => s.market === 'US').length,
+    KR: stocks.filter((s) => s.market === 'KR').length,
+  }), [stocks]);
+
+  const ranked = stocks
+    .filter((s) => tab === 'ALL' || s.market === tab)
+    .sort((a, b) => {
+      const ap = getTradePlan(a);
+      const bp = getTradePlan(b);
+      return beginnerMode ? bp.timingScore - ap.timingScore : b.score - a.score;
+    });
+
+  // v3.4: 초보자 모드에서도 한국/미국 TOP7이 비어 보이지 않게 한다.
+  // 먼저 매수금지 아닌 종목을 우선 표시하고, 7개가 부족하면 관망/매수금지도 뒤에 채운다.
+  const preferred = beginnerMode ? ranked.filter((s) => getSignal(s).tone !== 'danger') : ranked;
+  const fallback = beginnerMode ? ranked.filter((s) => getSignal(s).tone === 'danger') : [];
+  const filtered = [...preferred, ...fallback].slice(0, 7);
 
   const searchResults = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    return stocks.filter((s) => s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)).slice(0, 8);
+    return stocks.filter((s) => s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)).slice(0, 20);
   }, [query, stocks]);
 
   const watchlist = stocks.filter((s) => watchSymbols.includes(`${s.market}-${s.symbol}`));
@@ -505,13 +668,13 @@ export default function Page() {
   return (
     <main className="wrap">
       <div className="top">
-        <div className="brand"><h1>Alpha Radar AI</h1><p>Made by YHJ</p><p>실시간 데이터 · 점수 랭킹 · 진입가/손절가/목표가 자동 계산</p></div>
-        <div className="badge">{mode}</div>
+        <div className="brand"><h1>Alpha Radar AI</h1><p>Made by YHJ · v3.4 Full Market Mode</p><p>실시간 데이터 · 진입 타이밍 · 초보자 행동 가이드 · 손익비 자동 계산</p></div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}><button className="tab" onClick={() => setBeginnerMode((v) => !v)}>{beginnerMode ? '👶 초보자 모드 ON' : '⚡ 전체 모드'}</button><div className="badge">{mode}{lastUpdated ? ` · ${lastUpdated}` : ''}</div></div>
       </div>
 
       <section className="grid">
         <div className="card">
-          <h2>🏆 오늘의 TOP7</h2>
+          <h2>🏆 오늘의 TOP7</h2><div className="item good" style={{ marginBottom: 12 }}><b>{beginnerMode ? '👶 초보자 수익 모드' : '⚡ 전체 랭킹 모드'}</b><span className="muted">{beginnerMode ? '추천 종목을 우선 표시하고, 부족하면 관망/금지 종목도 뒤에 채워 TOP7을 유지합니다.' : '전체 종목을 AI 점수 순서로 보여줍니다.'}</span></div>
           <div style={{ position: 'relative', marginBottom: 12 }}>
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="종목 검색: NVDA, 삼성전자, 한화오션" style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', background: '#0b1220', color: '#fff', boxSizing: 'border-box' }} />
             {searchResults.length > 0 && (
@@ -525,15 +688,19 @@ export default function Page() {
             )}
           </div>
 
-          <div className="tabs"><button className="tab" onClick={() => setTab('ALL')}>전체</button><button className="tab" onClick={() => setTab('US')}>미국</button><button className="tab" onClick={() => setTab('KR')}>한국</button></div>
+          <div className="tabs"><button className="tab" onClick={() => setTab('ALL')}>전체 {marketCounts.ALL}</button><button className="tab" onClick={() => setTab('US')}>미국 {marketCounts.US}</button><button className="tab" onClick={() => setTab('KR')}>한국 {marketCounts.KR}</button></div>
 
-          {filtered.map((s, i) => (
-            <div className="rank" key={`${s.market}-${s.symbol}`} onClick={() => setSel(s)}>
-              <strong>{i + 1}</strong>
-              <div><b>{s.name}</b><div className="muted">{s.symbol} · {s.market}</div><div style={{ color: gradeColor(s.grade), fontSize: '12px', fontWeight: 'bold', marginTop: 2 }}>⭐ {s.grade ?? 'C'} Grade</div></div>
-              <div className="score">{s.score}점</div><div className="pill">{s.change_text || '관찰'}</div>
-            </div>
-          ))}
+          {filtered.map((s, i) => {
+            const signal = getSignal(s);
+            const plan = getTradePlan(s);
+            return (
+              <div className="rank" key={`${s.market}-${s.symbol}`} onClick={() => setSel(s)}>
+                <strong>{i + 1}</strong>
+                <div><b>{s.name}</b><div className="muted">{s.symbol} · {s.market}</div><div style={{ color: gradeColor(s.grade), fontSize: '12px', fontWeight: 'bold', marginTop: 2 }}>⭐ {s.grade ?? 'C'} Grade · 타이밍 {plan.timingScore}점</div></div>
+                <div className="score">{s.score}점</div><div className="pill">{signal.label}</div>
+              </div>
+            );
+          })}
 
           <div className="detail">
             <h3>{sel.name} 상세 분석</h3>
@@ -546,6 +713,7 @@ export default function Page() {
             <div className="item" style={{ marginTop: 12 }}><b>🎯 AI 판단</b><span className="muted">{sel.decision || '관망'}</span></div>
             <div className="item" style={{ marginTop: 8 }}><b>⚠️ 위험도</b><span className="muted">{sel.risk_level || '보통'}</span></div>
             <div className="item good" style={{ marginTop: 8 }}><b>📌 행동 가이드</b><span className="muted">{sel.action_text || '추가 확인 필요'}</span></div>
+            <ActionPlanCard stock={sel} fmt={fmt} />
             <p>💡 {sel.beginner_note}</p>
           </div>
         </div>
@@ -554,13 +722,13 @@ export default function Page() {
           <div className="card"><h2>⭐ 관심종목</h2>{watchlist.length ? watchlist.map((s) => (<div key={`watch-${s.market}-${s.symbol}`} className="item good" style={{ marginBottom: 8, cursor: 'pointer' }} onClick={() => setSel(s)}><b>{s.name} · {s.symbol}</b><span className="muted">{s.grade ?? 'C'} Grade · 점수 {s.score}점 · 목표가 {fmt(s.target_price, s.market)}</span></div>)) : stocks.slice(0, 3).map((s) => (<div key={`watch-auto-${s.market}-${s.symbol}`} className="item good" style={{ marginBottom: 8 }}><b>{s.name} · {s.symbol}</b><span className="muted">추천 관심 · {s.grade ?? 'C'} Grade · 점수 {s.score}점</span></div>))}</div>
           <ScoreBreakdown stock={sel} />
           <div className="card"><h2>📰 뉴스 요약</h2>{stocks.slice(0, 3).map((s) => (<div className="item" key={`news-${s.market}-${s.symbol}`} style={{ marginBottom: 8 }}><b>{s.name} · {s.symbol}</b><span className="muted">{s.reason || '뉴스/실적/추세 데이터 분석 중'}</span></div>))}</div>
-          <div className="card"><h2>🚨 위험경고</h2><div className="item warn"><b>{stocks.filter((s) => s.score >= 90).length}개 종목 강세</b><span className="muted">90점 이상 종목 실시간 감시중</span></div></div>
+          <div className="card"><h2>🚨 위험경고</h2><div className="item warn"><b>{stocks.filter((s) => getSignal(s).tone === 'danger').length}개 종목 매수금지</b><span className="muted">급등/손익비 부족/목표가 근접 종목은 초보자 모드에서 자동 제외됩니다.</span></div><div className="item good" style={{ marginTop: 8 }}><b>{stocks.filter((s) => getSignal(s).tone === 'hot' || getSignal(s).tone === 'good').length}개 종목 진입 후보</b><span className="muted">점수뿐 아니라 손익비와 진입가 괴리를 함께 통과한 종목입니다.</span></div></div>
           <PortfolioPanel stocks={stocks} fmt={fmt} />
           <div className="card chart-card"><h2>📈 차트 & 매매 플랜</h2><ChartPanel stock={sel} fmt={fmt} /></div>
         </div>
       </section>
 
-      <div className="footer">Alpha Radar AI v2.3 · 투자 참고용이며 매수/매도 책임은 사용자에게 있습니다.</div>
+      <div className="footer">Alpha Radar AI v3.4 · 투자 참고용이며 매수/매도 책임은 사용자에게 있습니다.</div>
     </main>
   );
 }
