@@ -581,6 +581,14 @@ export default function Page() {
   const [watchSymbols, setWatchSymbols] = useState<string[]>([]);
   const [beginnerMode, setBeginnerMode] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>('');
+  const detailRef = useRef<HTMLDivElement | null>(null);
+
+  const selectStock = (stock: Stock) => {
+    setSel(stock);
+    window.setTimeout(() => {
+      detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
 
   useEffect(() => {
     try {
@@ -619,7 +627,7 @@ export default function Page() {
       }
     }
     load(false);
-    const timer = setInterval(() => load(true), 180000);
+    const timer = setInterval(() => load(true), 5000);
     return () => clearInterval(timer);
   }, []);
 
@@ -668,7 +676,7 @@ export default function Page() {
   return (
     <main className="wrap">
       <div className="top">
-        <div className="brand"><h1>Alpha Radar AI</h1><p>Made by YHJ · v3.4 Full Market Mode</p><p>실시간 데이터 · 진입 타이밍 · 초보자 행동 가이드 · 손익비 자동 계산</p></div>
+        <div className="brand"><h1>Alpha Radar AI</h1><p>Made by YHJ · v3.5 Scroll + 5s Auto Refresh</p><p>실시간 데이터 · 진입 타이밍 · 초보자 행동 가이드 · 손익비 자동 계산</p></div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}><button className="tab" onClick={() => setBeginnerMode((v) => !v)}>{beginnerMode ? '👶 초보자 모드 ON' : '⚡ 전체 모드'}</button><div className="badge">{mode}{lastUpdated ? ` · ${lastUpdated}` : ''}</div></div>
       </div>
 
@@ -680,7 +688,7 @@ export default function Page() {
             {searchResults.length > 0 && (
               <div style={{ position: 'absolute', zIndex: 10, left: 0, right: 0, top: 48, background: '#111827', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, overflow: 'hidden' }}>
                 {searchResults.map((s) => (
-                  <div key={`search-${s.market}-${s.symbol}`} onClick={() => { setSel(s); setQuery(''); }} style={{ padding: 10, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div key={`search-${s.market}-${s.symbol}`} onClick={() => { selectStock(s); setQuery(''); }} style={{ padding: 10, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                     <b>{s.name} · {s.symbol}</b><span className="muted">{s.market} · {s.score}점</span>
                   </div>
                 ))}
@@ -694,7 +702,7 @@ export default function Page() {
             const signal = getSignal(s);
             const plan = getTradePlan(s);
             return (
-              <div className="rank" key={`${s.market}-${s.symbol}`} onClick={() => setSel(s)}>
+              <div className="rank" key={`${s.market}-${s.symbol}`} onClick={() => selectStock(s)}>
                 <strong>{i + 1}</strong>
                 <div><b>{s.name}</b><div className="muted">{s.symbol} · {s.market}</div><div style={{ color: gradeColor(s.grade), fontSize: '12px', fontWeight: 'bold', marginTop: 2 }}>⭐ {s.grade ?? 'C'} Grade · 타이밍 {plan.timingScore}점</div></div>
                 <div className="score">{s.score}점</div><div className="pill">{signal.label}</div>
@@ -702,7 +710,7 @@ export default function Page() {
             );
           })}
 
-          <div className="detail">
+          <div className="detail" ref={detailRef}>
             <h3>{sel.name} 상세 분석</h3>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 }}>
               <div style={{ color: gradeColor(sel.grade), fontWeight: 'bold', fontSize: '20px' }}>📈 Alpha Grade {sel.grade ?? 'C'}</div>
@@ -719,7 +727,7 @@ export default function Page() {
         </div>
 
         <div className="list">
-          <div className="card"><h2>⭐ 관심종목</h2>{watchlist.length ? watchlist.map((s) => (<div key={`watch-${s.market}-${s.symbol}`} className="item good" style={{ marginBottom: 8, cursor: 'pointer' }} onClick={() => setSel(s)}><b>{s.name} · {s.symbol}</b><span className="muted">{s.grade ?? 'C'} Grade · 점수 {s.score}점 · 목표가 {fmt(s.target_price, s.market)}</span></div>)) : stocks.slice(0, 3).map((s) => (<div key={`watch-auto-${s.market}-${s.symbol}`} className="item good" style={{ marginBottom: 8 }}><b>{s.name} · {s.symbol}</b><span className="muted">추천 관심 · {s.grade ?? 'C'} Grade · 점수 {s.score}점</span></div>))}</div>
+          <div className="card"><h2>⭐ 관심종목</h2>{watchlist.length ? watchlist.map((s) => (<div key={`watch-${s.market}-${s.symbol}`} className="item good" style={{ marginBottom: 8, cursor: 'pointer' }} onClick={() => selectStock(s)}><b>{s.name} · {s.symbol}</b><span className="muted">{s.grade ?? 'C'} Grade · 점수 {s.score}점 · 목표가 {fmt(s.target_price, s.market)}</span></div>)) : stocks.slice(0, 3).map((s) => (<div key={`watch-auto-${s.market}-${s.symbol}`} className="item good" style={{ marginBottom: 8 }}><b>{s.name} · {s.symbol}</b><span className="muted">추천 관심 · {s.grade ?? 'C'} Grade · 점수 {s.score}점</span></div>))}</div>
           <ScoreBreakdown stock={sel} />
           <div className="card"><h2>📰 뉴스 요약</h2>{stocks.slice(0, 3).map((s) => (<div className="item" key={`news-${s.market}-${s.symbol}`} style={{ marginBottom: 8 }}><b>{s.name} · {s.symbol}</b><span className="muted">{s.reason || '뉴스/실적/추세 데이터 분석 중'}</span></div>))}</div>
           <div className="card"><h2>🚨 위험경고</h2><div className="item warn"><b>{stocks.filter((s) => getSignal(s).tone === 'danger').length}개 종목 매수금지</b><span className="muted">급등/손익비 부족/목표가 근접 종목은 초보자 모드에서 자동 제외됩니다.</span></div><div className="item good" style={{ marginTop: 8 }}><b>{stocks.filter((s) => getSignal(s).tone === 'hot' || getSignal(s).tone === 'good').length}개 종목 진입 후보</b><span className="muted">점수뿐 아니라 손익비와 진입가 괴리를 함께 통과한 종목입니다.</span></div></div>
@@ -728,7 +736,7 @@ export default function Page() {
         </div>
       </section>
 
-      <div className="footer">Alpha Radar AI v3.4 · 투자 참고용이며 매수/매도 책임은 사용자에게 있습니다.</div>
+      <div className="footer">Alpha Radar AI v3.5 · 투자 참고용이며 매수/매도 책임은 사용자에게 있습니다.</div>
     </main>
   );
 }
