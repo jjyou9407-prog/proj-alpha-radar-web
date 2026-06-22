@@ -1,7 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { hasSupabase, supabase } from '../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
+import { hasSupabase as importedHasSupabase, supabase as importedSupabase } from '../lib/supabase';
+
+const envSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const envSupabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = importedSupabase ?? (envSupabaseUrl && envSupabaseAnonKey ? createClient(envSupabaseUrl, envSupabaseAnonKey) : null);
+const hasSupabase = Boolean(importedHasSupabase || supabase);
 
 type Category = 'US' | 'KR' | 'COIN' | 'FUTURES';
 type MainTab = 'PICKS' | 'SEARCH' | 'DETAIL' | 'PAPER' | 'HISTORY';
@@ -315,7 +321,6 @@ export default function Page() {
   const [authPassword, setAuthPassword] = useState('');
   const [authMessage, setAuthMessage] = useState('');
   const [showAuth, setShowAuth] = useState(false);
-
   const [paperMode, setPaperMode] = useState<'HOLD' | 'PENDING' | 'CLOSED'>('HOLD');
   const searchRef = useRef<HTMLInputElement | null>(null);
 
@@ -336,9 +341,13 @@ export default function Page() {
   };
 
   const validateAuthForm = () => {
-    const email = authEmail.trim();
+    const email = authEmail.trim().toLowerCase();
     if (!email || !authPassword) {
       alert('이메일과 비밀번호를 입력해줘.');
+      return null;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      alert('올바른 이메일 주소를 입력해줘.');
       return null;
     }
     if (authPassword.length < 6) {
@@ -346,7 +355,12 @@ export default function Page() {
       return null;
     }
     return { email, password: authPassword };
+  };
 
+  const resetAuthForm = () => {
+    setAuthEmail('');
+    setAuthPassword('');
+    setAuthMessage('');
   };
 
   const signInEmail = async () => {
@@ -355,15 +369,25 @@ export default function Page() {
     if (!form) return;
     setAuthBusy(true);
     setAuthMessage('');
-    const { error } = await supabase.auth.signInWithPassword(form);
-    if (error) {
-      alert(error.message);
-    } else {
+    try {
+      const { error } = await supabase.auth.signInWithPassword(form);
+      if (error) {
+        if (error.message.toLowerCase().includes('email not confirmed')) {
+          setAuthMessage('이메일 미인증 계정이야. Supabase에서 이 사용자를 삭제한 뒤 다시 가입해줘.');
+          return;
+        }
+        if (error.message.toLowerCase().includes('invalid login credentials')) {
+          setAuthMessage('이메일 또는 비밀번호를 확인해줘.');
+          return;
+        }
+        setAuthMessage(`로그인 실패: ${error.message}`);
+        return;
+      }
       setAuthMessage('로그인 완료');
       setShowAuth(false);
+    } finally {
+      setAuthBusy(false);
     }
-    setAuthBusy(false);
-
   };
 
   const signUpEmail = async () => {
@@ -372,19 +396,32 @@ export default function Page() {
     if (!form) return;
     setAuthBusy(true);
     setAuthMessage('');
-    const { data, error } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-      options: { data: { full_name: form.email.split('@')[0] } },
-    });
-    if (error) {
-      alert(error.message);
-    } else {
-      setAuthMessage(data.session ? '회원가입 및 로그인 완료' : '회원가입 완료. 바로 로그인을 눌러줘.');
-      if (data.session) setShowAuth(false);
-    }
-    setAuthBusy(false);
+    try {
+      const response = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setAuthMessage(result.error || '회원가입에 실패했어.');
+        return;
+      }
 
+      const { error: loginError } = await supabase.auth.signInWithPassword(form);
+      if (loginError) {
+        setAuthMessage('가입은 완료됐지만 자동 로그인에 실패했어. 로그인 버튼을 눌러줘.');
+        return;
+      }
+      setAuthEmail('');
+      setAuthPassword('');
+      setAuthMessage('회원가입과 로그인이 완료됐어.');
+      setShowAuth(false);
+    } catch {
+      setAuthMessage('서버와 연결할 수 없어. 잠시 후 다시 시도해줘.');
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const signOut = async () => {
@@ -393,7 +430,7 @@ export default function Page() {
     setUser(null);
     setTrades([]);
     setShowAuth(false);
-
+    resetAuthForm();
   };
 
   const loadLeaderboard = async () => {
@@ -462,38 +499,103 @@ export default function Page() {
 
   useEffect(() => {
     async function load(keepSelection = false) {
-      if (!hasSupabase || !supabase) return;
-      const { data, error } = await supabase.from('rankings').select('*').order('score', { ascending: false }).limit(1500);
-      if (error) {
-        console.error('Supabase rankings load error:', error);
-        setMode('Supabase 오류');
+      if (!supabase) {
+        setMode('Supabase 연결 없음');
         return;
       }
-      if (data && data.length) {
-        const mapped: Stock[] = data.map((r: any) => ({
+
+      let allRows: any[] = [];
+      let loadError: any = null;
+
+      // Supabase 기본 반환 제한에 걸려 일부만 읽히는 문제를 막기 위해 1000개씩 나눠서 전부 읽습니다.
+      for (let from = 0; from < 5000; from += 1000) {
+        const to = from + 999;
+        const { data, error } = await supabase
+          .from('rankings')
+          .select('*')
+          .order('score', { ascending: false })
+          .range(from, to);
+
+        if (error) {
+          loadError = error;
+          break;
+        }
+
+        const rows = data || [];
+        allRows = allRows.concat(rows);
+        if (rows.length < 1000) break;
+      }
+
+      if (loadError) {
+        console.error('Supabase rankings load error:', loadError);
+        setMode(`Supabase 오류: ${loadError.message || 'rankings 조회 실패'}`);
+        return;
+      }
+
+      if (!allRows.length) {
+        setStocks([]);
+        setMode('Supabase 연결 · rankings 0개');
+        return;
+      }
+
+      const mapped: Stock[] = allRows
+        .map((r: any) => ({
           symbol: String(r.symbol ?? '').trim(),
           name: String(r.name ?? '').trim() || String(r.symbol ?? '').trim(),
           market: String(r.market ?? '').trim().toUpperCase(),
-          score: num(r.score), grade: r.grade ?? 'C', price: num(r.price), entry_price: num(r.entry_price), stop_price: num(r.stop_price), target_price: num(r.target_price),
-          reason: r.reason ?? '', beginner_note: r.beginner_note ?? '', change_text: r.change_text ?? '관찰', decision: r.decision ?? '관망', risk_level: r.risk_level ?? '보통', action_text: r.action_text ?? '추가 확인 필요',
-          trend_score: num(r.trend_score), volume_score: num(r.volume_score), news_score: num(r.news_score), earnings_score: num(r.earnings_score), flow_score: num(r.flow_score), risk_score: num(r.risk_score), timing_score: num(r.timing_score),
-          win_rate: num(r.win_rate), expected_return: num(r.expected_return), loss_risk: num(r.loss_risk), final_score: num(r.final_score), confidence_grade: r.confidence_grade ?? '',
-          asset_class: r.asset_class ?? '', trade_type: r.trade_type ?? '', side: r.side ?? '',
-        }));
-        mapped.sort((a, b) => profitScore(b) - profitScore(a));
-        setStocks(mapped);
-        setSel((prev) => {
-          if (!keepSelection) return mapped.find((s) => getCategory(s) === activeCat) ?? mapped[0];
-          return mapped.find((x) => x.symbol === prev.symbol && getCategory(x) === getCategory(prev) && String(x.side || 'LONG') === String(prev.side || 'LONG')) ?? prev;
-        });
-        setMode('Supabase 실시간 연결');
-        setLastUpdated(new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }));
-      }
+          score: num(r.score),
+          grade: r.grade ?? 'C',
+          price: num(r.price),
+          entry_price: num(r.entry_price),
+          stop_price: num(r.stop_price),
+          target_price: num(r.target_price),
+          reason: r.reason ?? '',
+          beginner_note: r.beginner_note ?? '',
+          change_text: r.change_text ?? '관찰',
+          decision: r.decision ?? '관망',
+          risk_level: r.risk_level ?? '보통',
+          action_text: r.action_text ?? '추가 확인 필요',
+          trend_score: num(r.trend_score),
+          volume_score: num(r.volume_score),
+          news_score: num(r.news_score),
+          earnings_score: num(r.earnings_score),
+          flow_score: num(r.flow_score),
+          risk_score: num(r.risk_score),
+          timing_score: num(r.timing_score),
+          win_rate: num(r.win_rate),
+          expected_return: num(r.expected_return),
+          loss_risk: num(r.loss_risk),
+          final_score: num(r.final_score),
+          confidence_grade: r.confidence_grade ?? '',
+          asset_class: r.asset_class ?? '',
+          trade_type: r.trade_type ?? '',
+          side: r.side ?? '',
+        }))
+        .filter((s) => s.symbol && s.market);
+
+      mapped.sort((a, b) => profitScore(b) - profitScore(a));
+      setStocks(mapped);
+
+      const nextCounts = {
+        US: mapped.filter((s) => getCategory(s) === 'US').length,
+        KR: mapped.filter((s) => getCategory(s) === 'KR').length,
+        COIN: mapped.filter((s) => getCategory(s) === 'COIN').length,
+        FUTURES: mapped.filter((s) => getCategory(s) === 'FUTURES').length,
+      };
+
+      setSel((prev) => {
+        if (!keepSelection) return mapped.find((s) => getCategory(s) === activeCat) ?? mapped[0] ?? demo[0];
+        return mapped.find((x) => x.symbol === prev.symbol && getCategory(x) === getCategory(prev) && String(x.side || 'LONG') === String(prev.side || 'LONG')) ?? mapped.find((s) => getCategory(s) === activeCat) ?? mapped[0] ?? prev;
+      });
+
+      setMode(`Supabase 실시간 연결 · US ${nextCounts.US} / KR ${nextCounts.KR} / COIN ${nextCounts.COIN} / FUT ${nextCounts.FUTURES}`);
+      setLastUpdated(new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }));
     }
+
     load(false);
     const timer = setInterval(() => load(true), 5000);
     return () => clearInterval(timer);
-  }, []);
+  }, [activeCat]);
 
   useEffect(() => {
     const check = async () => {
@@ -557,8 +659,7 @@ export default function Page() {
   const closedWinRate = closedTrades.length ? (closedTrades.filter((t) => num(t.pnlPct) > 0).length / closedTrades.length) * 100 : 0;
 
   const openOrder = async (s: Stock, requestPrice: number, qty: number) => {
-    if (!user) return alert('먼저 로그인해주세요.');
-
+    if (!user) return alert('먼저 로그인해줘.');
     if (!hasSupabase || !supabase) return alert('Supabase 연결이 필요합니다.');
     const cat = getCategory(s);
     const existing = activeTrades.filter((p) => p.category === cat).length + pendingTrades.filter((p) => p.category === cat).length;
@@ -613,13 +714,12 @@ export default function Page() {
         <em>Made By YHJ</em>
         <span><i />{mode} {lastUpdated ? `· ${lastUpdated}` : ''}</span>
       </div>
-      {user ? <button className="userBtn" onClick={signOut}>👤 {user.email?.split('@')[0]} · 로그아웃</button> : <button className="paperTop" onClick={() => setShowAuth(true)}>로그인</button>}
-
+      {user ? <button className="userBtn" onClick={signOut}>로그아웃 · {user.email?.split('@')[0]}</button> : <button className="paperTop" onClick={() => setShowAuth(true)} disabled={authBusy}>로그인</button>}
       <button className="menuBtn" onClick={() => { setActiveTab('SEARCH'); setTimeout(() => searchRef.current?.focus(), 100); }}>☰</button>
     </header>
   );
 
-  const AuthPanel = ({ compact = false }: { compact?: boolean }) => (
+  const renderAuthPanel = (compact = false) => (
     <div className={compact ? 'authPanel compact' : 'authPanel'}>
       <div className="sectionTitle"><b>로그인</b><span>이메일 + 비밀번호</span></div>
       <div className="authInputs">
@@ -644,10 +744,9 @@ export default function Page() {
         <button className="primary" onClick={signInEmail} disabled={authBusy}>{authBusy ? '처리중...' : '로그인'}</button>
         <button className="ghostBtn" onClick={signUpEmail} disabled={authBusy}>회원가입</button>
       </div>
-      <p className="authHint">메일 인증번호 없이 이메일/비밀번호로 로그인합니다. 한 번 로그인하면 세션이 유지됩니다.</p>
+      <p className="authHint">인증 메일 없이 회원가입 즉시 로그인되고, 로그인 세션이 유지됩니다.</p>
     </div>
   );
-
 
   const BottomNav = () => (
     <nav className="bottomNav">
@@ -780,7 +879,7 @@ export default function Page() {
         <div><h1>모의투자</h1><p>예약주문 · 보유종목 · 거래기록을 한 화면에서 관리합니다.</p></div>
         <button className="paperTop" onClick={() => setActiveTab('PICKS')}>+ 종목 찾기</button>
       </div>
-      {!user && <div className="loginBox"><b>로그인 필요</b><p>로그인 후 예약주문/거래기록이 Supabase에 저장됩니다.</p><AuthPanel compact /></div>}
+      {!user && <div className="loginBox"><b>로그인 필요</b><p>로그인 후 예약주문/거래기록이 Supabase에 저장됩니다.</p>{renderAuthPanel(true)}</div>}
       <div className="paperDashboard premiumBox">
         <div className="sectionTitle"><b>내 모의투자 성과</b><span>청산 완료 기준</span></div>
         <div className="performanceHero">
@@ -850,7 +949,7 @@ export default function Page() {
         <div className="authOverlay" onClick={() => setShowAuth(false)}>
           <div onClick={(e) => e.stopPropagation()}>
             <button className="authClose" onClick={() => setShowAuth(false)}>×</button>
-            <AuthPanel />
+            {renderAuthPanel()}
           </div>
         </div>
       )}
@@ -876,7 +975,6 @@ export default function Page() {
         .actionStrip.danger{border-color:rgba(255,84,84,.38);background:linear-gradient(135deg,rgba(255,84,84,.12),rgba(8,13,19,.86))}.actionStrip.danger span{color:#ff5454;border-color:rgba(255,84,84,.45)}
         .paperDashboard{margin:10px 0 12px}.performanceHero{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}.performanceHero div{background:linear-gradient(145deg,rgba(13,20,28,.95),rgba(7,11,16,.95));border:1px solid rgba(148,163,184,.13);border-radius:16px;padding:14px}.performanceHero span{display:block;color:#9ba7b6;font-size:12px}.performanceHero b{display:block;margin-top:5px;font-size:25px;letter-spacing:-.04em}.performanceHero em{display:block;margin-top:5px;color:#8793a4;font-style:normal;font-size:11px}.paperSummary{grid-template-columns:repeat(4,1fr)!important}.paperSummary div{padding:10px 8px}.paperSummary b{font-size:15px!important}
         .bottomNav{position:fixed;left:0;right:0;bottom:0;z-index:100;height:76px;background:rgba(6,10,15,.93);backdrop-filter:blur(18px);border-top:1px solid rgba(148,163,184,.13);display:grid;grid-template-columns:repeat(5,1fr);padding:7px 8px 8px}.bottomNav button{border:0;background:transparent;color:#9ba6b4;border-radius:16px;font-size:25px;font-weight:800}.bottomNav span{display:block;font-size:11px;margin-top:2px}.bottomNav .on{color:#20d58a;background:rgba(32,213,138,.10)}
-
 
         .searchScreen{padding-bottom:96px}.searchInput{position:sticky;top:70px;z-index:20;box-shadow:0 14px 30px rgba(0,0,0,.35)}.searchResults{margin-top:10px}
         @media (min-width:760px){.content{max-width:430px}.screen{max-width:430px;margin:0 auto}.metricGrid{grid-template-columns:repeat(2,1fr)}.bottomNav{max-width:430px;left:50%;transform:translateX(-50%);bottom:12px;border-radius:24px;border:1px solid rgba(148,163,184,.16);box-shadow:0 16px 40px rgba(0,0,0,.5)}}
