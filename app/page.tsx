@@ -311,16 +311,11 @@ export default function Page() {
   const [paperEntry, setPaperEntry] = useState('');
   const [paperQty, setPaperQty] = useState('1');
   const [authBusy, setAuthBusy] = useState(false);
-<<<<<<< Updated upstream
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authMessage, setAuthMessage] = useState('');
   const [showAuth, setShowAuth] = useState(false);
-=======
-  const [showAuth, setShowAuth] = useState(false);
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
->>>>>>> Stashed changes
+
   const [paperMode, setPaperMode] = useState<'HOLD' | 'PENDING' | 'CLOSED'>('HOLD');
   const searchRef = useRef<HTMLInputElement | null>(null);
 
@@ -340,7 +335,6 @@ export default function Page() {
     });
   };
 
-<<<<<<< Updated upstream
   const validateAuthForm = () => {
     const email = authEmail.trim();
     if (!email || !authPassword) {
@@ -352,16 +346,11 @@ export default function Page() {
       return null;
     }
     return { email, password: authPassword };
-=======
-  const resetAuthForm = () => {
-    setAuthEmail('');
-    setAuthPassword('');
->>>>>>> Stashed changes
+
   };
 
   const signInEmail = async () => {
     if (!hasSupabase || !supabase) return alert('Supabase 연결이 필요합니다.');
-<<<<<<< Updated upstream
     const form = validateAuthForm();
     if (!form) return;
     setAuthBusy(true);
@@ -374,23 +363,11 @@ export default function Page() {
       setShowAuth(false);
     }
     setAuthBusy(false);
-=======
-    if (!authEmail.trim() || !authPassword.trim()) return alert('이메일과 비밀번호를 입력해줘.');
-    setAuthBusy(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: authEmail.trim(),
-      password: authPassword,
-    });
-    setAuthBusy(false);
-    if (error) return alert(error.message);
-    setShowAuth(false);
-    resetAuthForm();
->>>>>>> Stashed changes
+
   };
 
   const signUpEmail = async () => {
     if (!hasSupabase || !supabase) return alert('Supabase 연결이 필요합니다.');
-<<<<<<< Updated upstream
     const form = validateAuthForm();
     if (!form) return;
     setAuthBusy(true);
@@ -407,22 +384,7 @@ export default function Page() {
       if (data.session) setShowAuth(false);
     }
     setAuthBusy(false);
-=======
-    if (!authEmail.trim() || !authPassword.trim()) return alert('이메일과 비밀번호를 입력해줘.');
-    if (authPassword.length < 6) return alert('비밀번호는 최소 6자리 이상으로 해줘.');
-    setAuthBusy(true);
-    const { data, error } = await supabase.auth.signUp({
-      email: authEmail.trim(),
-      password: authPassword,
-    });
-    setAuthBusy(false);
-    if (error) return alert(error.message);
-    if (data.user && !data.session) {
-      return alert('회원가입은 됐는데 이메일 확인이 켜져 있어. Supabase Email 설정에서 Confirm email을 OFF로 바꿔야 바로 로그인돼.');
-    }
-    setShowAuth(false);
-    resetAuthForm();
->>>>>>> Stashed changes
+
   };
 
   const signOut = async () => {
@@ -431,10 +393,7 @@ export default function Page() {
     setUser(null);
     setTrades([]);
     setShowAuth(false);
-<<<<<<< Updated upstream
-=======
-    resetAuthForm();
->>>>>>> Stashed changes
+
   };
 
   const loadLeaderboard = async () => {
@@ -598,11 +557,8 @@ export default function Page() {
   const closedWinRate = closedTrades.length ? (closedTrades.filter((t) => num(t.pnlPct) > 0).length / closedTrades.length) * 100 : 0;
 
   const openOrder = async (s: Stock, requestPrice: number, qty: number) => {
-<<<<<<< Updated upstream
     if (!user) return alert('먼저 로그인해주세요.');
-=======
-    if (!user) return alert('먼저 로그인해줘.');
->>>>>>> Stashed changes
+
     if (!hasSupabase || !supabase) return alert('Supabase 연결이 필요합니다.');
     const cat = getCategory(s);
     const existing = activeTrades.filter((p) => p.category === cat).length + pendingTrades.filter((p) => p.category === cat).length;
@@ -657,16 +613,12 @@ export default function Page() {
         <em>Made By YHJ</em>
         <span><i />{mode} {lastUpdated ? `· ${lastUpdated}` : ''}</span>
       </div>
-<<<<<<< Updated upstream
       {user ? <button className="userBtn" onClick={signOut}>👤 {user.email?.split('@')[0]} · 로그아웃</button> : <button className="paperTop" onClick={() => setShowAuth(true)}>로그인</button>}
-=======
-      {user ? <button className="userBtn" onClick={signOut}>로그아웃 · {user.email?.split('@')[0]}</button> : <button className="paperTop" onClick={() => setShowAuth(true)} disabled={authBusy}>로그인</button>}
->>>>>>> Stashed changes
+
       <button className="menuBtn" onClick={() => { setActiveTab('SEARCH'); setTimeout(() => searchRef.current?.focus(), 100); }}>☰</button>
     </header>
   );
 
-<<<<<<< Updated upstream
   const AuthPanel = ({ compact = false }: { compact?: boolean }) => (
     <div className={compact ? 'authPanel compact' : 'authPanel'}>
       <div className="sectionTitle"><b>로그인</b><span>이메일 + 비밀번호</span></div>
@@ -695,47 +647,7 @@ export default function Page() {
       <p className="authHint">메일 인증번호 없이 이메일/비밀번호로 로그인합니다. 한 번 로그인하면 세션이 유지됩니다.</p>
     </div>
   );
-=======
-  const AuthModal = () => {
-    if (!showAuth || user) return null;
-    return (
-      <div className="authOverlay" onClick={() => setShowAuth(false)}>
-        <div className="authModal" onClick={(e) => e.stopPropagation()}>
-          <div className="sectionTitle"><b>로그인</b><span>이메일 + 비밀번호</span></div>
-          <input
-            className="authInput"
-            type="email"
-            value={authEmail}
-            onChange={(e) => setAuthEmail(e.target.value)}
-            placeholder="이메일"
-            autoComplete="email"
-          />
-          <input
-            className="authInput"
-            type="password"
-            value={authPassword}
-            onChange={(e) => setAuthPassword(e.target.value)}
-            placeholder="비밀번호 6자리 이상"
-            autoComplete="current-password"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') signInEmail();
-            }}
-          />
-          <button className="primary" onClick={signInEmail} disabled={authBusy}>
-            {authBusy ? '처리중...' : '로그인'}
-          </button>
-          <button className="secondaryAuth" onClick={signUpEmail} disabled={authBusy}>
-            회원가입
-          </button>
-          <button className="closeAuth" onClick={() => setShowAuth(false)}>
-            닫기
-          </button>
-          <p className="authHelp">인증번호 없이 바로 쓰려면 Supabase Email 설정에서 Confirm email을 OFF로 둬야 합니다.</p>
-        </div>
-      </div>
-    );
-  };
->>>>>>> Stashed changes
+
 
   const BottomNav = () => (
     <nav className="bottomNav">
@@ -830,7 +742,6 @@ export default function Page() {
         <div className="sectionTitle"><b>추천 진입가</b><span>분할 진입 전략</span></div>
         <div className="entryMiniGrid">
           {entryGuide.ranges.map((r) => <div className="entryMini" key={r.label}><span>{r.label} · {r.note}</span><b>{money(r.price, sel.market)}</b><em>진입 가능</em></div>)}
-<<<<<<< Updated upstream
         </div>
       </div>
 
@@ -966,136 +877,7 @@ export default function Page() {
         .paperDashboard{margin:10px 0 12px}.performanceHero{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}.performanceHero div{background:linear-gradient(145deg,rgba(13,20,28,.95),rgba(7,11,16,.95));border:1px solid rgba(148,163,184,.13);border-radius:16px;padding:14px}.performanceHero span{display:block;color:#9ba7b6;font-size:12px}.performanceHero b{display:block;margin-top:5px;font-size:25px;letter-spacing:-.04em}.performanceHero em{display:block;margin-top:5px;color:#8793a4;font-style:normal;font-size:11px}.paperSummary{grid-template-columns:repeat(4,1fr)!important}.paperSummary div{padding:10px 8px}.paperSummary b{font-size:15px!important}
         .bottomNav{position:fixed;left:0;right:0;bottom:0;z-index:100;height:76px;background:rgba(6,10,15,.93);backdrop-filter:blur(18px);border-top:1px solid rgba(148,163,184,.13);display:grid;grid-template-columns:repeat(5,1fr);padding:7px 8px 8px}.bottomNav button{border:0;background:transparent;color:#9ba6b4;border-radius:16px;font-size:25px;font-weight:800}.bottomNav span{display:block;font-size:11px;margin-top:2px}.bottomNav .on{color:#20d58a;background:rgba(32,213,138,.10)}
 
-=======
-        </div>
-      </div>
 
-      <div className="orderBox premiumBox compactOrder">
-        <div className="sectionTitle"><b>모의투자 주문</b><span>{selectedCategory === 'FUTURES' && String(sel.side).toUpperCase() === 'SHORT' ? 'SHORT 예약' : 'LONG/현물 예약'}</span></div>
-        <div className="orderInputs"><label>진입가<input value={paperEntry} onChange={(e) => setPaperEntry(e.target.value)} /></label><label>수량<input value={paperQty} onChange={(e) => setPaperQty(e.target.value)} /></label></div>
-        <button className="primary" onClick={() => openOrder(sel, selectedEntry, selectedQty)}>예약주문 등록</button>
-      </div>
-
-      <div className="analysisBox premiumBox">
-        <div className="sectionTitle"><b>AI 종합 분석</b><span>자세히 보기 ›</span></div>
-        <div className="analysisGrid">
-          <div><span>추세</span><b>상승 추세</b><span>모멘텀</span><b>강함</b><span>시장심리</span><b className="green">긍정적</b></div>
-          <div><span>거래량</span><b>증가</b><span>변동성</span><b>보통</b><span>리스크</span><b className="yellow">보통</b></div>
-        </div>
-        <div className="pointGrid">
-          <div><b>핵심 포인트</b><p>• 승률 {derivedWinRate(sel).toFixed(0)}% 구간 진입<br/>• 분할 진입으로 리스크 관리 권장<br/>• {sel.reason || sel.action_text || 'AI 분석 대기'}</p></div>
-          <div><b>주의 사항</b><p>• 시장 변동성 확대 구간 주의<br/>• 손절가 이탈 시 손실 최소화<br/>• 단기 급등 시 추격 매수 금지</p></div>
-        </div>
-        <div className="modelInfo"><span>업데이트<br/><b>{lastUpdated || '-'}</b></span><span>데이터 소스<br/><b>Supabase 실시간</b></span><span>모델 버전<br/><b>Alpha Radar v3.2</b></span></div>
-      </div>
-    </section>
-  );
-
-  const TradeRow = ({ row }: { row: { p: PaperTrade; stock?: Stock; cur: number; pnlPct: number; pnlMoney: number } }) => (
-    <div className="holdCard">
-      <div className="holdTop"><div><b>{row.p.name}</b><span>{row.p.symbol} · {categoryName(row.p.category)} · {row.p.side}</span></div><strong className={row.pnlPct >= 0 ? 'green' : 'red'}>{pct(row.pnlPct)}</strong></div>
-      <div className="holdMetrics"><span>진입 {money(row.p.fillPrice || row.p.requestedPrice, row.p.market)}</span><span>현재 {money(row.cur, row.p.market)}</span><span>손익 {row.pnlMoney >= 0 ? '+' : ''}{row.pnlMoney.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
-      <div className="holdActions"><button className="sell" onClick={() => closeTrade(row.p)}>매도/청산</button><button className="buy" onClick={() => { setSel(row.stock || sel); setPaperEntry(String(row.cur)); setActiveTab('DETAIL'); }}>추가매수</button></div>
-    </div>
-  );
-
-  const PaperView = () => (
-    <section className="screen paperScreen">
-      <div className="portfolioHero">
-        <div><h1>모의투자</h1><p>예약주문 · 보유종목 · 거래기록을 한 화면에서 관리합니다.</p></div>
-        <button className="paperTop" onClick={() => setActiveTab('PICKS')}>+ 종목 찾기</button>
-      </div>
-      {!user && <div className="loginBox"><b>로그인 필요</b><p>이메일/비밀번호로 로그인하면 예약주문/거래기록이 Supabase에 저장됩니다.</p><button className="primary" onClick={() => setShowAuth(true)}>로그인 / 회원가입</button></div>}
-      <div className="paperDashboard premiumBox">
-        <div className="sectionTitle"><b>내 모의투자 성과</b><span>청산 완료 기준</span></div>
-        <div className="performanceHero">
-          <div><span>승률</span><b>{closedTrades.length ? `${closedWinRate.toFixed(1)}%` : '-'}</b><em>{closedTrades.length}건 완료</em></div>
-          <div><span>총손익</span><b className={totalPnl >= 0 ? 'green' : 'red'}>{totalPnl >= 0 ? '+' : ''}{totalPnl.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b><em>보유 기준</em></div>
-        </div>
-        <div className="summaryGrid paperSummary">
-          <div><span>평가금</span><b>{totalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b></div>
-          <div><span>평균수익</span><b className={avgClosedPnl >= 0 ? 'green' : 'red'}>{closedTrades.length ? pct(avgClosedPnl) : '-'}</b></div>
-          <div><span>최근10회</span><b>{recentTen.length ? `${recentWinRate.toFixed(1)}%` : '-'}</b></div>
-          <div><span>최고수익</span><b className="green">{closedTrades.length ? pct(bestClosedPnl) : '-'}</b></div>
-        </div>
-      </div>
-      <div className="paperTabs">
-        <button className={paperMode === 'HOLD' ? 'on' : ''} onClick={() => setPaperMode('HOLD')}>보유중 <b>{portfolioRows.length}</b></button>
-        <button className={paperMode === 'PENDING' ? 'on' : ''} onClick={() => setPaperMode('PENDING')}>대기주문 <b>{pendingTrades.length}</b></button>
-        <button className={paperMode === 'CLOSED' ? 'on' : ''} onClick={() => setPaperMode('CLOSED')}>거래기록 <b>{closedTrades.length}</b></button>
-      </div>
-      {paperMode === 'HOLD' && (portfolioRows.length ? portfolioRows.map((r) => <TradeRow key={r.p.id} row={r} />) : <div className="empty">보유 종목 없음</div>)}
-      {paperMode === 'PENDING' && (pendingTrades.length ? pendingTrades.map((p) => <div key={p.id} className="pendingCard"><div><b>{p.name}</b><span>{p.symbol} · 예약가 {money(p.requestedPrice, p.market)}</span></div><button onClick={() => cancelTrade(p)}>취소</button></div>) : <div className="empty">대기 주문 없음</div>)}
-      {paperMode === 'CLOSED' && (closedTrades.length ? closedTrades.map((p) => <div key={p.id} className="historyLine"><div><b>{p.name}</b><span>{p.symbol} · {categoryName(p.category)} · {p.side}</span></div><strong className={num(p.pnlPct) >= 0 ? 'green' : 'red'}>{pct(num(p.pnlPct))}</strong></div>) : <div className="empty">거래 기록 없음</div>)}
-    </section>
-  );
-
-  const recentTen = closedTrades.slice(0, 10);
-  const recentWinRate = recentTen.length ? (recentTen.filter((t) => num(t.pnlPct) > 0).length / recentTen.length) * 100 : 0;
-  const avgClosedPnl = closedTrades.length ? closedTrades.reduce((a, t) => a + num(t.pnlPct), 0) / closedTrades.length : 0;
-  const bestClosedPnl = closedTrades.length ? Math.max(...closedTrades.map((t) => num(t.pnlPct))) : 0;
-  const totalClosedPnl = closedTrades.reduce((a, t) => a + num(t.pnlMoney), 0);
-
-  const HistoryView = () => (
-    <section className="screen">
-      <h1>내 투자 기록</h1>
-      <div className="heroCard historyHero">
-        <div>
-          <span className="muted">청산 완료 거래 기준</span>
-          <h1>{closedTrades.length ? `${closedWinRate.toFixed(1)}%` : '-'} 승률</h1>
-          <p>랭킹 없이 내 모의투자 성과만 깔끔하게 봅니다.</p>
-        </div>
-      </div>
-      <div className="summaryGrid">
-        <div><span>총 거래수</span><b>{closedTrades.length}</b></div>
-        <div><span>평균수익</span><b className={avgClosedPnl >= 0 ? 'green' : 'red'}>{closedTrades.length ? pct(avgClosedPnl) : '-'}</b></div>
-        <div><span>최근10회</span><b>{recentTen.length ? `${recentWinRate.toFixed(1)}%` : '-'}</b></div>
-      </div>
-      <div className="summaryGrid">
-        <div><span>현재 보유</span><b>{activeTrades.length}</b></div>
-        <div><span>대기 주문</span><b>{pendingTrades.length}</b></div>
-        <div><span>누적손익</span><b className={totalClosedPnl >= 0 ? 'green' : 'red'}>{totalClosedPnl >= 0 ? '+' : ''}{totalClosedPnl.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b></div>
-      </div>
-      <h2>📜 청산 기록</h2>
-      {closedTrades.length ? closedTrades.map((p) => <div key={p.id} className="historyLine"><div><b>{p.name}</b><span>{p.symbol} · {categoryName(p.category)} · {p.side}</span></div><strong className={num(p.pnlPct) >= 0 ? 'green' : 'red'}>{pct(num(p.pnlPct))}</strong></div>) : <div className="empty">청산 기록 없음</div>}
-    </section>
-  );
-
-  return (
-    <main className="app">
-      <h1 style={{color:"red"}}>TEST 999</h1>
-      <Header />
-      <AuthModal />
-      <div className="content">
-        {activeTab === 'PICKS' && PicksView()}
-        {activeTab === 'SEARCH' && SearchView()}
-        {activeTab === 'DETAIL' && DetailView()}
-        {activeTab === 'PAPER' && PaperView()}
-        {activeTab === 'HISTORY' && HistoryView()}
-      </div>
-      <BottomNav />
-      <style jsx>{`
-        :global(body){margin:0;background:#03070d;color:#eef4ff;font-family:Inter,Apple SD Gothic Neo,Segoe UI,Arial,sans-serif;}
-        :global(*){box-sizing:border-box;}
-        .app{min-height:100vh;background:radial-gradient(circle at 20% 0%,rgba(18,93,75,.35),transparent 34%),radial-gradient(circle at 95% 10%,rgba(26,44,71,.55),transparent 40%),#05080d;padding-bottom:92px;}
-        .content{width:100%;max-width:860px;margin:0 auto;padding:16px 14px 20px;}
-        .screen{animation:fade .18s ease;}@keyframes fade{from{opacity:.55;transform:translateY(5px)}to{opacity:1;transform:none}}
-        h1{font-size:26px;line-height:1.1;margin:4px 0 7px;letter-spacing:-.04em}h2{font-size:17px;margin:18px 0 10px}.muted,.hint{color:#9ca7b8;font-size:12px}.green{color:#20d58a}.red{color:#ff5454}.yellow{color:#f5c84b}
-        .topbar{position:sticky;top:0;z-index:80;display:flex;align-items:center;gap:10px;min-height:74px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.05);background:linear-gradient(180deg,rgba(3,7,13,.96),rgba(3,7,13,.72));backdrop-filter:blur(18px);}
-        .backBtn,.menuBtn{width:32px;height:42px;border:0;background:transparent;color:#eaf2ff;font-size:34px;line-height:1}.menuBtn{font-size:25px}.brand{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.brand b{font-size:24px;letter-spacing:-.04em}.brand em{display:block;color:#b9c2cf;font-style:normal;font-weight:700;font-size:14px}.brand span{color:#94a3b8;font-size:12px}.brand span i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#20d58a;margin-right:5px}.paperTop,.userBtn{border:1px solid rgba(32,213,138,.7);background:rgba(32,213,138,.08);color:#33e79a;border-radius:999px;padding:10px 14px;font-weight:900;white-space:nowrap}.userBtn{max-width:150px;overflow:hidden;text-overflow:ellipsis}.paperTop.big{padding:12px 15px}.miniSearch{display:none}.authOverlay{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.68);display:grid;place-items:center;padding:18px}.authModal{width:100%;max-width:360px;border:1px solid rgba(148,163,184,.18);background:linear-gradient(145deg,rgba(16,22,29,.98),rgba(8,12,17,.98));border-radius:22px;padding:18px;box-shadow:0 24px 80px rgba(0,0,0,.55)}.authInput{width:100%;border:1px solid rgba(148,163,184,.18);background:#081120;color:white;border-radius:14px;padding:13px;margin-bottom:9px;font-size:15px;outline:none}.secondaryAuth,.closeAuth{width:100%;border:1px solid rgba(148,163,184,.18);background:rgba(148,163,184,.1);color:#eef4ff;font-weight:900;border-radius:14px;padding:12px;margin-top:8px}.closeAuth{background:transparent;color:#9ba7b8}.authHelp{margin:12px 0 0;color:#94a3b8;font-size:12px;line-height:1.45}
-        .heroCard,.detailHeader,.portfolioHero,.loginBox,.aiBox,.entryBox,.orderBox,.stockHero,.premiumBox{border:1px solid rgba(148,163,184,.15);background:linear-gradient(145deg,rgba(16,22,29,.94),rgba(8,12,17,.94));border-radius:22px;padding:16px;box-shadow:0 18px 42px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.04)}.heroCard,.portfolioHero,.detailHeader{display:flex;justify-content:space-between;gap:12px;align-items:center}.heroCard p{margin:0;color:#9fb0c7;font-size:13px;line-height:1.4}
-        .catTabs{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:12px 0}.catTabs button{border:1px solid rgba(148,163,184,.14);background:#101820;color:#d4deea;border-radius:15px;padding:11px 8px;font-weight:900}.catTabs button span{display:none}.catTabs .on{background:rgba(32,213,138,.13);border-color:rgba(32,213,138,.55);color:#20d58a}.listCards{display:grid;gap:10px}.stockCard{display:grid;grid-template-columns:38px 1fr auto;align-items:center;gap:10px;width:100%;text-align:left;border:1px solid rgba(148,163,184,.13);background:linear-gradient(145deg,rgba(16,22,29,.94),rgba(8,12,17,.94));border-radius:18px;padding:14px;color:#e5eefb;box-shadow:0 10px 28px rgba(0,0,0,.20)}.rankNo{width:30px;height:30px;border-radius:10px;background:rgba(32,213,138,.14);display:grid;place-items:center;color:#20d58a!important}.stockMain b{display:block;font-size:17px}.stockMain span,.stockNums span{display:block;color:#96a2b1;font-size:12px;margin-top:3px}.stockMain em{display:block;color:#b8c1ce;font-size:11px;font-style:normal;margin-top:4px}.stockNums{text-align:right}.stockNums b{color:#20d58a;font-size:22px}.searchInput{width:100%;border:1px solid rgba(148,163,184,.18);background:#09111a;color:white;border-radius:16px;padding:15px;font-size:16px;outline:none}.empty{border:1px dashed rgba(148,163,184,.24);border-radius:18px;padding:18px;text-align:center;color:#94a3b8;background:rgba(15,23,42,.38)}
-        .detailScreen{display:grid;gap:10px}.stockHero{display:grid;grid-template-columns:1fr 1.05fr;gap:12px;align-items:stretch}.heroLeft h1{font-size:30px;margin:0 0 10px}.heroLeft p{margin:0 0 18px;color:#9aa6b5;font-size:16px}.heroLeft em{display:block;color:#98a3b2;font-style:normal;margin-top:10px}.judgementRow{display:flex;align-items:center;gap:12px}.judgementRow span{border:1px solid rgba(32,213,138,.6);color:#20d58a;border-radius:10px;padding:7px 10px;font-weight:900}.judgementRow b{font-size:26px;color:#20d58a}.pricePanel{position:relative;border:1px solid rgba(148,163,184,.14);background:rgba(8,13,19,.72);border-radius:18px;padding:14px;min-height:138px;overflow:hidden}.pricePanel span{color:#a3adbb}.pricePanel b{display:block;font-size:24px;margin:8px 0}.pricePanel strong{font-size:15px}.spark{position:absolute;right:12px;bottom:12px;width:42%;height:72px;border-radius:14px;background:linear-gradient(180deg,rgba(32,213,138,.2),rgba(32,213,138,.03));overflow:hidden}.spark i{position:absolute;left:8px;right:8px;bottom:20px;height:3px;background:#20d58a;transform:skewY(-24deg);box-shadow:18px -14px 0 -1px #20d58a,38px -8px 0 -1px #20d58a,58px -24px 0 -1px #20d58a}
-        .actionStrip{display:flex;gap:10px;align-items:flex-start;border:1px solid rgba(32,213,138,.34);background:linear-gradient(135deg,rgba(32,213,138,.13),rgba(8,13,19,.84));border-radius:18px;padding:12px 14px;box-shadow:0 12px 28px rgba(0,0,0,.22)}.actionStrip span{flex:0 0 auto;color:#20d58a;font-size:12px;font-weight:1000;border:1px solid rgba(32,213,138,.45);border-radius:999px;padding:5px 8px}.actionStrip b{font-size:15px;line-height:1.45;color:#eef4ff;font-weight:900}
-        .metricGrid,.summaryGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0}.summaryGrid{grid-template-columns:repeat(3,1fr);margin:10px 0}.metricGrid div,.summaryGrid div{background:rgba(16,24,33,.8);border:1px solid rgba(148,163,184,.13);border-radius:15px;padding:13px}.metricGrid span,.summaryGrid span{display:block;color:#99a5b5;font-size:13px}.metricGrid b,.summaryGrid b{display:block;margin-top:6px;font-size:18px}.sectionTitle{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.sectionTitle:before{content:'';width:4px;height:24px;border-radius:99px;background:#20d58a;margin-right:10px}.sectionTitle b{font-size:19px;flex:1}.sectionTitle span{color:#aab4c2;font-size:13px}.entryMiniGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.entryMini{background:rgba(12,18,26,.9);border:1px solid rgba(148,163,184,.13);border-radius:15px;padding:13px}.entryMini span{display:block;color:#9ea9b8;font-size:13px}.entryMini b{display:block;margin:10px 0;color:#eef4ff;font-size:20px}.entryMini em{display:inline-block;background:rgba(32,213,138,.14);color:#20d58a;border-radius:8px;padding:5px 8px;font-size:12px;font-style:normal;font-weight:800}.compactOrder{padding-top:14px}.orderInputs{display:grid;grid-template-columns:1fr 1fr;gap:8px}.orderInputs label{font-size:12px;color:#94a3b8}.orderInputs input{width:100%;margin-top:5px;border:1px solid rgba(148,163,184,.18);background:#081120;color:white;border-radius:12px;padding:11px}.primary{width:100%;border:0;background:linear-gradient(135deg,#16a34a,#20d58a);color:#05110c;font-weight:1000;border-radius:14px;padding:13px;margin-top:10px}.analysisGrid,.pointGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.analysisGrid div,.pointGrid div{background:rgba(12,18,26,.82);border:1px solid rgba(148,163,184,.12);border-radius:15px;padding:13px}.analysisGrid span{display:inline-block;width:82px;color:#98a4b3;margin:6px 0}.analysisGrid b{font-weight:900}.pointGrid b{display:block;margin-bottom:10px}.pointGrid p{margin:0;color:#bbc5d3;line-height:1.62}.modelInfo{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;background:rgba(8,13,19,.62);border-radius:14px;padding:10px}.modelInfo span{text-align:center;color:#9aa6b5;font-size:12px}.modelInfo b{color:#dfe7f3;font-weight:700}
-        .holdCard,.pendingCard,.historyLine,.rankLine{border:1px solid rgba(148,163,184,.13);background:rgba(15,23,42,.82);border-radius:15px;padding:12px;margin-bottom:9px}.holdTop,.pendingCard,.historyLine,.rankLine{display:flex;justify-content:space-between;gap:10px;align-items:center}.holdTop span,.pendingCard span,.historyLine span,.rankLine span{display:block;color:#8da0b8;font-size:12px;margin-top:3px}.holdMetrics{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin:10px 0;color:#b8c4d6;font-size:13px}.holdActions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.sell,.buy,.pendingCard button{border:0;border-radius:12px;padding:10px;color:white;font-weight:900}.sell{background:#dc2626}.buy{background:#16a34a}.pendingCard button{background:#374151;padding:8px 12px}.loginBox{margin-bottom:12px}
-        .actionStrip.buy{border-color:rgba(32,213,138,.45);background:linear-gradient(135deg,rgba(32,213,138,.16),rgba(8,13,19,.86))}.actionStrip.buy span{color:#20d58a;border-color:rgba(32,213,138,.55)}
-        .actionStrip.wait{border-color:rgba(245,200,75,.35);background:linear-gradient(135deg,rgba(245,200,75,.12),rgba(8,13,19,.86))}.actionStrip.wait span{color:#f5c84b;border-color:rgba(245,200,75,.45)}
-        .actionStrip.danger{border-color:rgba(255,84,84,.38);background:linear-gradient(135deg,rgba(255,84,84,.12),rgba(8,13,19,.86))}.actionStrip.danger span{color:#ff5454;border-color:rgba(255,84,84,.45)}
-        .paperDashboard{margin:10px 0 12px}.performanceHero{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}.performanceHero div{background:linear-gradient(145deg,rgba(13,20,28,.95),rgba(7,11,16,.95));border:1px solid rgba(148,163,184,.13);border-radius:16px;padding:14px}.performanceHero span{display:block;color:#9ba7b6;font-size:12px}.performanceHero b{display:block;margin-top:5px;font-size:25px;letter-spacing:-.04em}.performanceHero em{display:block;margin-top:5px;color:#8793a4;font-style:normal;font-size:11px}.paperSummary{grid-template-columns:repeat(4,1fr)!important}.paperSummary div{padding:10px 8px}.paperSummary b{font-size:15px!important}
-        .bottomNav{position:fixed;left:0;right:0;bottom:0;z-index:100;height:76px;background:rgba(6,10,15,.93);backdrop-filter:blur(18px);border-top:1px solid rgba(148,163,184,.13);display:grid;grid-template-columns:repeat(5,1fr);padding:7px 8px 8px}.bottomNav button{border:0;background:transparent;color:#9ba6b4;border-radius:16px;font-size:25px;font-weight:800}.bottomNav span{display:block;font-size:11px;margin-top:2px}.bottomNav .on{color:#20d58a;background:rgba(32,213,138,.10)}
-
->>>>>>> Stashed changes
         .searchScreen{padding-bottom:96px}.searchInput{position:sticky;top:70px;z-index:20;box-shadow:0 14px 30px rgba(0,0,0,.35)}.searchResults{margin-top:10px}
         @media (min-width:760px){.content{max-width:430px}.screen{max-width:430px;margin:0 auto}.metricGrid{grid-template-columns:repeat(2,1fr)}.bottomNav{max-width:430px;left:50%;transform:translateX(-50%);bottom:12px;border-radius:24px;border:1px solid rgba(148,163,184,.16);box-shadow:0 16px 40px rgba(0,0,0,.5)}}
         @media (max-width:480px){.actionStrip{padding:10px 11px;border-radius:15px}.actionStrip span{font-size:11px;padding:4px 7px}.actionStrip b{font-size:13px;line-height:1.35}}
