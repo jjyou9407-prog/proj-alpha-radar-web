@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { hasSupabase, supabase } from '../lib/supabase';
 
+type Category = 'US' | 'KR' | 'COIN' | 'FUTURES';
+type MainTab = 'PICKS' | 'SEARCH' | 'DETAIL' | 'PAPER' | 'HISTORY';
+type PaperStatus = 'PENDING' | 'FILLED' | 'CLOSED' | 'CANCELED';
+
 type Stock = {
   symbol: string;
   name: string;
@@ -13,8 +17,8 @@ type Stock = {
   entry_price: number;
   stop_price: number;
   target_price: number;
-  reason: string;
-  beginner_note: string;
+  reason?: string;
+  beginner_note?: string;
   change_text?: string;
   decision?: string;
   risk_level?: string;
@@ -25,602 +29,457 @@ type Stock = {
   earnings_score?: number;
   flow_score?: number;
   risk_score?: number;
+  timing_score?: number;
+  win_rate?: number;
+  expected_return?: number;
+  loss_risk?: number;
+  final_score?: number;
+  confidence_grade?: string;
+  asset_class?: string;
+  trade_type?: string;
+  side?: string;
 };
 
-type PortfolioItem = {
+type PaperTrade = {
   id: string;
+  user_id?: string;
   symbol: string;
-  avgPrice: number;
+  name: string;
+  market: string;
+  category: Category;
+  side: string;
+  status: PaperStatus;
+  requestedPrice: number;
+  fillPrice?: number;
+  closePrice?: number;
   qty: number;
+  pnlPct?: number;
+  pnlMoney?: number;
+  createdAt: string;
+  filledAt?: string;
+  closedAt?: string;
+};
+
+type LeaderboardRow = {
+  user_id?: string;
+  display_name?: string;
+  email?: string;
+  total_trades?: number;
+  wins?: number;
+  losses?: number;
+  win_rate?: number;
+  avg_pnl_pct?: number;
+  total_pnl?: number;
 };
 
 const demo: Stock[] = [
   {
-    symbol: 'NVDA', name: '엔비디아', market: 'US', score: 94, grade: 'S',
-    price: 128.4, entry_price: 124.5, stop_price: 118.2, target_price: 139.8,
-    reason: 'AI 반도체 섹터 강세 + 거래량 증가 + 실적 모멘텀 우수',
-    beginner_note: 'Alpha Radar 분석 결과: S Grade. 좋은 종목이지만 급등 후에는 무리하지 말고 진입가 근처 조정을 기다리는 전략이 안전합니다.',
-    change_text: '+2.8%', decision: '강력매수', risk_level: '낮음', action_text: '1차 분할매수 가능. 급등 시 추격매수 금지, 눌림목 우선.',
-    trend_score: 24, volume_score: 18, news_score: 14, earnings_score: 14, flow_score: 14, risk_score: 10,
+    symbol: 'NVDA', name: '엔비디아', market: 'US', score: 92, grade: 'S', price: 135.68,
+    entry_price: 128.9, stop_price: 119.8, target_price: 152.5, reason: '데모 데이터 · AI 수익률 우선 랭킹',
+    beginner_note: '데모 모드입니다.', change_text: '+2.35%', decision: '관찰 매수', risk_level: '보통', action_text: '1차 진입가 부근 대기',
+    timing_score: 16, trend_score: 18, volume_score: 13, news_score: 8, earnings_score: 9, flow_score: 8, risk_score: 7,
+    win_rate: 72, expected_return: 12.3, loss_risk: 28, final_score: 88, asset_class: 'STOCK', trade_type: 'SWING', side: 'LONG', confidence_grade: 'A',
   },
 ];
 
-function tvSymbol(s: Stock) {
-  if (s.market === 'KR') return `KRX:${s.symbol}`;
-  const nyse = ['BA','CAT','CRM','CVX','DE','DIS','ETN','GE','GEV','GS','HD','JPM','LLY','LMT','MA','NOC','NVO','ORCL','RTX','SHOP','SNOW','TSM','UBER','V','VRT','WMT','XOM'];
-  if (nyse.includes(s.symbol.toUpperCase())) return `NYSE:${s.symbol}`;
-  return `NASDAQ:${s.symbol}`;
-}
+const CATS: { id: Category; label: string }[] = [
+  { id: 'US', label: '🇺🇸 미국 TOP10' },
+  { id: 'KR', label: '🇰🇷 한국 TOP10' },
+  { id: 'COIN', label: '₿ 코인 TOP10' },
+  { id: 'FUTURES', label: '⚡ 선물 TOP10' },
+];
 
-function naverLink(s: Stock) {
-  return `https://finance.naver.com/item/main.naver?code=${s.symbol}`;
-}
-
-function tradingViewLink(s: Stock) {
-  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol(s))}`;
-}
-
-
-function safePrice(value: number, fallback: number) {
-  if (Number.isFinite(value) && value > 0) return value;
-  return fallback;
-}
-
-function parsePercent(text?: string) {
-  if (!text) return 0;
-  const cleaned = String(text).replace('%', '').replace('+', '').replace(',', '.').trim();
-  const value = Number(cleaned);
-  return Number.isFinite(value) ? value : 0;
+function num(v: any, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-function getTradePlan(stock: Stock) {
-  const price = safePrice(stock.price, 0);
-  const entry1 = safePrice(stock.entry_price, price * 0.985);
-
-  // v3.3 핵심 수정:
-  // 1차/2차/3차 분할매수 구조에서는 손절가가 3차 매수가보다 반드시 아래여야 한다.
-  // 이전 버전은 Supabase stop_price를 그대로 써서 3차 매수가보다 손절가가 위에 표시되는 문제가 있었다.
-  const entry2 = stock.market === 'KR' ? entry1 * 0.97 : entry1 * 0.965;
-  const entry3 = stock.market === 'KR' ? entry1 * 0.94 : entry1 * 0.93;
-
-  const rawStop = safePrice(stock.stop_price, entry1 * 0.88);
-  const stopBuffer = stock.market === 'KR' ? 0.965 : 0.96;
-  const maxAllowedStop = entry3 * stopBuffer;
-  const minAllowedStop = entry1 * 0.78;
-  const stop = Math.max(Math.min(rawStop, maxAllowedStop), minAllowedStop);
-
-  const target1 = safePrice(stock.target_price, entry1 * 1.08);
-  const target2 = target1 * 1.045;
-  const upside = entry1 > 0 ? ((target1 - entry1) / entry1) * 100 : 0;
-  const downside = entry1 > 0 ? ((entry1 - stop) / entry1) * 100 : 0;
-  const rr = downside > 0 ? upside / downside : 0;
-  const currentPremium = entry1 > 0 ? ((price - entry1) / entry1) * 100 : 0;
-  const targetGap = price > 0 ? ((target1 - price) / price) * 100 : 0;
-  const dayMove = parsePercent(stock.change_text);
-  const overheatingPenalty = Math.round(
-    clamp(Math.max(dayMove - 4, 0) * 2 + Math.max(currentPremium - 3, 0) * 3 + Math.max(6 - targetGap, 0) * 2, 0, 25)
-  );
-  const timingScore = clamp(Math.round(stock.score - overheatingPenalty + Math.min(rr, 3) * 4), 0, 100);
-  const adjustedStop = rawStop !== stop;
-  return { price, entry1, entry2, entry3, stop, rawStop, adjustedStop, target1, target2, upside, downside, rr, currentPremium, targetGap, dayMove, overheatingPenalty, timingScore };
+function normalizePercent(v?: number) {
+  const n = num(v, 0);
+  if (n > 0 && n <= 1) return n * 100;
+  return n;
 }
 
-function getSignal(stock: Stock) {
-  const p = getTradePlan(stock);
-  const riskText = String(stock.risk_level ?? '').toLowerCase();
-  const highRisk = riskText.includes('높') || riskText.includes('high');
-  const danger = stock.score < 60 || p.rr < 1 || p.downside > 16 || p.targetGap < 3 || p.currentPremium > 8 || p.dayMove > 10 || highRisk;
-  if (danger) {
-    return { label: '🔴 매수금지', tone: 'danger', summary: '지금은 초보자가 따라가기 위험한 자리입니다.' };
-  }
-  if (stock.score >= 88 && p.timingScore >= 82 && p.rr >= 1.5) {
-    return { label: '🔥 적극관심', tone: 'hot', summary: '단, 한 번에 몰빵 금지. 1차만 작게 들어가는 자리입니다.' };
-  }
-  if (stock.score >= 75 && p.timingScore >= 70 && p.rr >= 1.25) {
-    return { label: '🟢 매수가능', tone: 'good', summary: '분할매수 기준으로 접근 가능한 자리입니다.' };
-  }
-  if (stock.score >= 65) {
-    return { label: '🟡 대기', tone: 'wait', summary: '종목은 괜찮지만 진입 타이밍은 조금 더 기다리는 쪽입니다.' };
-  }
-  return { label: '⚪ 관찰', tone: 'neutral', summary: '관심종목에 두고 점수와 가격 변화를 더 확인하세요.' };
+function parsePct(text?: string) {
+  if (!text) return 0;
+  const n = Number(String(text).replace('%', '').replace('+', '').replace(',', '.').trim());
+  return Number.isFinite(n) ? n : 0;
 }
 
-function formatPct(n: number) {
+function getCategory(s: Stock): Category {
+  const market = String(s.market || '').toUpperCase();
+  const asset = String(s.asset_class || '').toUpperCase();
+  const trade = String(s.trade_type || '').toUpperCase();
+  const side = String(s.side || '').toUpperCase();
+  if (asset.includes('FUT') || trade.includes('FUT') || trade.includes('PERP')) return 'FUTURES';
+  if ((side === 'SHORT' || side === 'LONG') && !['US', 'KR'].includes(market) && (trade.includes('LONG') || trade.includes('SHORT'))) return 'FUTURES';
+  if (asset.includes('COIN') || asset.includes('CRYPTO') || market.includes('COIN') || market.includes('CRYPTO')) return 'COIN';
+  if (market === 'KR') return 'KR';
+  return 'US';
+}
+
+function categoryName(c: Category) {
+  if (c === 'US') return '미국';
+  if (c === 'KR') return '한국';
+  if (c === 'COIN') return '코인';
+  return '선물';
+}
+
+function marketBadge(c: Category) {
+  if (c === 'US') return 'US';
+  if (c === 'KR') return 'KR';
+  if (c === 'COIN') return 'COIN';
+  return 'FUT';
+}
+
+function maxPositions(c: Category) {
+  if (c === 'US' || c === 'KR') return 7;
+  if (c === 'COIN') return 5;
+  return 3;
+}
+
+function sideLabel(s: Stock) {
+  const c = getCategory(s);
+  const side = String(s.side || 'LONG').toUpperCase();
+  if (c === 'FUTURES') return side === 'SHORT' ? 'SHORT' : 'LONG';
+  if (c === 'COIN') return 'SPOT';
+  return 'SWING';
+}
+
+function profitScore(s: Stock) {
+  const finalScore = num(s.final_score, 0);
+  if (finalScore > 0) return finalScore;
+  const win = normalizePercent(s.win_rate);
+  const exp = normalizePercent(s.expected_return);
+  const risk = normalizePercent(s.loss_risk);
+  const timing = num(s.timing_score, 0);
+  return clamp(num(s.score) * 0.45 + win * 0.3 + exp * 0.8 + timing * 0.35 - risk * 0.18, 0, 100);
+}
+
+function derivedWinRate(s: Stock) {
+  const direct = normalizePercent(s.win_rate);
+  if (direct > 0) return clamp(direct, 35, 95);
+  const timing = num(s.timing_score, 0);
+  const dayMove = parsePct(s.change_text);
+  const risk = String(s.risk_level || '').includes('높') ? 8 : 0;
+  return clamp(42 + num(s.score) * 0.25 + timing * 0.35 - Math.max(dayMove - 5, 0) * 1.5 - risk, 35, 88);
+}
+
+function derivedExpectedReturn(s: Stock) {
+  const direct = normalizePercent(s.expected_return);
+  if (direct !== 0) return direct;
+  const entry = num(s.entry_price, s.price);
+  const target = num(s.target_price, entry);
+  return entry > 0 ? ((target - entry) / entry) * 100 : 0;
+}
+
+function derivedLossRisk(s: Stock) {
+  const direct = normalizePercent(s.loss_risk);
+  if (direct > 0) return clamp(direct, 0, 100);
+  const entry = num(s.entry_price, s.price);
+  const stop = num(s.stop_price, entry * 0.9);
+  const lossPct = entry > 0 ? Math.max(0, ((entry - stop) / entry) * 100) : 0;
+  return clamp(lossPct * 3.2 + Math.max(parsePct(s.change_text) - 6, 0) * 4, 0, 100);
+}
+
+function money(n: number, market: string) {
+  if (!Number.isFinite(n) || n <= 0) return '-';
+  const m = String(market || '').toUpperCase();
+  if (m === 'KR') return `${Math.round(n).toLocaleString()}원`;
+  if (n >= 1000) return `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  return `$${n.toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
+}
+
+function pct(n: number) {
   if (!Number.isFinite(n)) return '-';
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 }
 
-function planClassName(tone: string) {
-  if (tone === 'danger') return 'item warn';
-  if (tone === 'hot' || tone === 'good') return 'item good';
-  return 'item';
-}
-
-function ActionPlanCard({ stock, fmt }: { stock: Stock; fmt: (n: number, m: string) => string; }) {
-  const plan = getTradePlan(stock);
-  const signal = getSignal(stock);
-  const forbid: string[] = [];
-  if (plan.currentPremium > 8) forbid.push('현재가가 1차 진입가보다 많이 높음: 추격매수 금지');
-  if (plan.targetGap < 3) forbid.push('목표가와 너무 가까움: 상승여력 부족');
-  if (plan.dayMove > 10) forbid.push('하루 급등폭 과다: 다음 눌림목 대기');
-  if (plan.downside > 16) forbid.push('손절폭이 16% 이상: 초보자에게 위험');
-  if (plan.rr < 1.2) forbid.push('손익비가 낮음: 벌 자리보다 잃을 자리가 큼');
-  if (stock.score < 60) forbid.push('AI 점수 60점 미만: 우선순위 낮음');
-  const beginnerBudget = stock.market === 'KR' ? '10만원' : '$100';
-
-  return (
-    <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
-      <div className={planClassName(signal.tone)}>
-        <b>🚦 지금 신호: {signal.label}</b>
-        <span className="muted">타이밍 점수 {plan.timingScore}점 · 과열 감점 -{plan.overheatingPenalty}점 · {signal.summary}</span>
-      </div>
-
-      <div className="item good">
-        <b>🎯 오늘 행동</b>
-        <span className="muted">1차 매수: {fmt(plan.entry1, stock.market)} 이하</span>
-        <span className="muted">2차 매수: {fmt(plan.entry2, stock.market)} 근처</span>
-        <span className="muted">3차 매수: {fmt(plan.entry3, stock.market)} 근처</span>
-        <span className="muted">손절: {fmt(plan.stop, stock.market)} 종가 이탈 시 정리</span>
-        {plan.adjustedStop && <span className="muted">※ 3차 매수가보다 아래로 자동 보정됨</span>}
-        <span className="muted">1차 목표: {fmt(plan.target1, stock.market)} · 최종 목표: {fmt(plan.target2, stock.market)}</span>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-        <div className="num"><span>예상수익</span><b style={{ color: '#22c55e' }}>{formatPct(plan.upside)}</b></div>
-        <div className="num"><span>예상손실</span><b style={{ color: '#ef4444' }}>-{plan.downside.toFixed(1)}%</b></div>
-        <div className="num"><span>손익비</span><b>{plan.rr ? `${plan.rr.toFixed(2)} : 1` : '-'}</b></div>
-      </div>
-
-      <div className="item">
-        <b>👶 초보자 따라하기</b>
-        <span className="muted">{beginnerBudget} 기준: 1차 30%, 2차 30%, 3차 40%만 사용. 몰빵 금지.</span>
-        <span className="muted">손절은 장중 터치가 아니라 종가 이탈 기준으로 판단. 단, 악재 뉴스가 터지면 예외.</span>
-        <span className="muted">1차 목표 도달 시 절반 익절, 나머지는 본전 이상에서 관리.</span>
-      </div>
-
-      <div className={forbid.length ? 'item warn' : 'item good'}>
-        <b>{forbid.length ? '🚫 매수금지 조건' : '✅ 초보자 진입 체크'}</b>
-        {(forbid.length ? forbid : ['현재 기준 큰 금지 조건은 없음. 그래도 1차 소액 분할만 권장.']).map((x) => (
-          <span className="muted" key={x}>• {x}</span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TradingViewUSChart({ stock }: { stock: Stock }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    containerRef.current.innerHTML = '';
-
-    const widgetBox = document.createElement('div');
-    widgetBox.className = 'tradingview-widget-container__widget';
-    containerRef.current.appendChild(widgetBox);
-
-    const script = document.createElement('script');
-    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-symbol-overview.js';
-    script.async = true;
-    script.innerHTML = JSON.stringify({
-      symbols: [[stock.name, `${tvSymbol(stock)}|1D`]],
-      chartOnly: false,
-      width: '100%',
-      height: 520,
-      locale: 'kr',
-      colorTheme: 'dark',
-      autosize: false,
-      showVolume: true,
-      showMA: true,
-      hideDateRanges: false,
-      hideMarketStatus: false,
-      hideSymbolLogo: false,
-      scalePosition: 'right',
-      scaleMode: 'Normal',
-      fontFamily: '-apple-system, BlinkMacSystemFont, Trebuchet MS, Roboto, Ubuntu, sans-serif',
-      fontSize: '10',
-      noTimeScale: false,
-      valuesTracking: '1',
-      changeMode: 'price-and-percent',
-      chartType: 'candlesticks',
-      maLineColor: '#2962FF',
-      maLineWidth: 1,
-      maLength: 9,
-      lineWidth: 2,
-      lineType: 0,
-      dateRanges: ['1d|1', '1m|30', '3m|60', '12m|1D', '60m|1W', 'all|1M'],
-    });
-    containerRef.current.appendChild(script);
-    return () => { if (containerRef.current) containerRef.current.innerHTML = ''; };
-  }, [stock.symbol, stock.name, stock.market]);
-
-  return (
-    <div>
-      <div className="item good" style={{ marginBottom: 10 }}>
-        <b>{stock.name} · {stock.symbol}</b>
-        <span className="muted">TradingView · {tvSymbol(stock)} · {stock.grade ?? 'C'} Grade · {stock.score}점</span>
-      </div>
-      <div ref={containerRef} className="tradingview-widget-container" style={{ width: '100%', height: 520, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden', background: '#111' }} />
-      <div style={{ marginTop: 10 }}>
-        <a href={tradingViewLink(stock)} target="_blank" rel="noreferrer" style={{ display: 'inline-block', padding: '10px 14px', borderRadius: 10, background: '#2563eb', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: 13 }}>TradingView 크게 열기</a>
-      </div>
-    </div>
-  );
-}
-
-function KoreanPlanPanel({ stock, fmt }: { stock: Stock; fmt: (n: number, m: string) => string; }) {
-  return (
-    <div style={{ width: '100%', minHeight: 420, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, background: 'linear-gradient(180deg, rgba(18,24,38,0.98), rgba(10,12,18,0.98))', padding: 16, boxSizing: 'border-box' }}>
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>KOREA STOCK · {tvSymbol(stock)}</div>
-        <div style={{ fontSize: 22, fontWeight: 900, color: '#fff' }}>{stock.name}</div>
-        <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>{stock.symbol} · {stock.market}</div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
-        <div className="num"><span>현재가</span><b>{fmt(stock.price, stock.market)}</b></div>
-        <div className="num"><span>등락률</span><b>{stock.change_text || '관찰'}</b></div>
-        <div className="num"><span>Alpha Grade</span><b>{stock.grade ?? 'C'}</b></div>
-        <div className="num"><span>점수</span><b>{stock.score}점</b></div>
-      </div>
-
-      <div style={{ height: 150, borderRadius: 14, background: 'linear-gradient(135deg, rgba(16,185,129,0.18), rgba(59,130,246,0.08), rgba(239,68,68,0.12))', border: '1px solid rgba(255,255,255,0.08)', position: 'relative', overflow: 'hidden', marginBottom: 14 }}>
-        <svg width="100%" height="150" viewBox="0 0 400 150" preserveAspectRatio="none" style={{ position: 'absolute', left: 0, top: 0 }}>
-          <polyline points="0,115 40,108 80,112 120,92 160,96 200,70 240,76 280,52 320,60 360,40 400,45" fill="none" stroke="rgba(34,197,94,0.95)" strokeWidth="4" />
-          <polyline points="0,125 40,118 80,122 120,102 160,106 200,80 240,86 280,62 320,70 360,50 400,55" fill="none" stroke="rgba(34,197,94,0.15)" strokeWidth="12" />
-        </svg>
-        <div style={{ position: 'absolute', left: 14, top: 12, color: '#d1fae5', fontSize: 12, fontWeight: 700 }}>AI 추세 시각화</div>
-        <div style={{ position: 'absolute', right: 14, bottom: 12, color: '#fff', fontSize: 12, opacity: 0.8 }}>실제 매매 전 외부 차트 확인 필요</div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
-        <div className="num"><span>진입가</span><b>{fmt(stock.entry_price, stock.market)}</b></div>
-        <div className="num"><span>손절가</span><b>{fmt(stock.stop_price, stock.market)}</b></div>
-        <div className="num"><span>목표가</span><b>{fmt(stock.target_price, stock.market)}</b></div>
-      </div>
-
-      <div className="item good" style={{ marginBottom: 10 }}><b>판단 요약</b><span className="muted">{stock.action_text || '추가 확인 필요'}</span></div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <a href={tradingViewLink(stock)} target="_blank" rel="noreferrer" style={{ display: 'inline-block', padding: '10px 14px', borderRadius: 10, background: '#2563eb', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: 13 }}>TradingView 열기</a>
-        <a href={naverLink(stock)} target="_blank" rel="noreferrer" style={{ display: 'inline-block', padding: '10px 14px', borderRadius: 10, background: '#16a34a', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: 13 }}>네이버증권 열기</a>
-      </div>
-    </div>
-  );
-}
-
-function ChartPanel({ stock, fmt }: { stock: Stock; fmt: (n: number, m: string) => string; }) {
-  if (stock.market === 'US') return <TradingViewUSChart key={`${stock.market}-${stock.symbol}`} stock={stock} />;
-  return <KoreanPlanPanel key={`${stock.market}-${stock.symbol}`} stock={stock} fmt={fmt} />;
-}
-
-function ScoreBreakdown({ stock }: { stock: Stock }) {
-  const rows = [
-    ['추세', stock.trend_score ?? 0, 25],
-    ['거래량', stock.volume_score ?? 0, 20],
-    ['뉴스', stock.news_score ?? 0, 15],
-    ['실적', stock.earnings_score ?? 0, 15],
-    ['수급', stock.flow_score ?? 0, 15],
-    ['리스크', stock.risk_score ?? 0, 10],
+function getEntryGuide(s: Stock, baseEntry?: number) {
+  const cat = getCategory(s);
+  const side = String(s.side || 'LONG').toUpperCase();
+  const isShort = cat === 'FUTURES' && side === 'SHORT';
+  const entry1 = num(baseEntry, num(s.entry_price, s.price));
+  let entry2 = entry1 * 0.965;
+  let entry3 = entry1 * 0.93;
+  if (cat === 'KR' || cat === 'COIN') {
+    entry2 = entry1 * 0.97;
+    entry3 = entry1 * 0.94;
+  }
+  if (cat === 'FUTURES') {
+    entry2 = isShort ? entry1 * 1.025 : entry1 * 0.975;
+    entry3 = isShort ? entry1 * 1.05 : entry1 * 0.95;
+  }
+  const ranges = [
+    { label: '1차', price: entry1, note: isShort ? '첫 숏' : '첫 진입' },
+    { label: '2차', price: entry2, note: isShort ? '추가 숏' : '눌림 추가' },
+    { label: '3차', price: entry3, note: isShort ? '최종 숏' : '최종 분할' },
   ];
-
-  return (
-    <div className="card">
-      <h2>📊 AI 점수 세부내역</h2>
-      {rows.map(([label, value, max]) => {
-        const pct = Number(max) ? Math.round((Number(value) / Number(max)) * 100) : 0;
-        return (
-          <div key={String(label)} style={{ marginBottom: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 5 }}>
-              <b>{label}</b>
-              <span className="muted">{value} / {max}</span>
-            </div>
-            <div style={{ height: 8, background: 'rgba(255,255,255,0.08)', borderRadius: 999, overflow: 'hidden' }}>
-              <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg,#2563eb,#22c55e)', borderRadius: 999 }} />
-            </div>
-          </div>
-        );
-      })}
-      <div className="item good" style={{ marginTop: 12 }}>
-        <b>총점 {stock.score}점</b>
-        <span className="muted">{stock.grade ?? 'C'} Grade · {stock.decision || '관망'}</span>
-      </div>
-    </div>
-  );
+  return { isShort, ranges };
 }
 
-function PortfolioPanel({ stocks, fmt }: { stocks: Stock[]; fmt: (n: number, m: string) => string; }) {
-  const [symbol, setSymbol] = useState('');
-  const [avgPrice, setAvgPrice] = useState('');
-  const [qty, setQty] = useState('');
-  const [items, setItems] = useState<PortfolioItem[]>([]);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('alphaRadarPortfolio');
-      if (saved) setItems(JSON.parse(saved));
-    } catch {}
-  }, []);
+function getTodayAction(s: Stock) {
+  const cat = getCategory(s);
+  const side = String(s.side || 'LONG').toUpperCase();
+  const isShort = cat === 'FUTURES' && side === 'SHORT';
+  const current = num(s.price);
+  const entry = num(s.entry_price, current);
+  const stop = num(s.stop_price);
+  const target = num(s.target_price);
+  const win = derivedWinRate(s);
 
-  useEffect(() => {
-    localStorage.setItem('alphaRadarPortfolio', JSON.stringify(items));
-  }, [items]);
+  if (!current || !entry) return s.action_text || '데이터 확인 후 진입 판단';
 
-  const findStock = (code: string) => {
-    const key = code.trim().toUpperCase();
-    return stocks.find(
-      (s) =>
-        s.symbol.toUpperCase() === key ||
-        s.name.toLowerCase() === code.trim().toLowerCase()
-    );
-  };
+  if (isShort) {
+    if (current >= entry * 0.995) return `오늘 행동: 1차 숏 구간 접근 · 분할 진입 가능 · 승률 ${win.toFixed(0)}%`;
+    if (target > 0 && current <= target * 1.03) return '오늘 행동: 목표가 근처 · 신규 숏보다는 수익 관리 우선';
+    return `오늘 행동: 추격 숏 금지 · ${money(entry, s.market)} 부근까지 대기`;
+  }
 
-  const addItem = () => {
-    const raw = symbol.trim();
-    const matched = findStock(raw);
-    const code = (matched?.symbol || raw).toUpperCase();
-    const avg = Number(avgPrice.replace(/,/g, ''));
-    const amount = Number(qty.replace(/,/g, '') || '1');
+  if (stop > 0 && current <= stop * 1.025) return '오늘 행동: 손절가 근처 · 신규 진입 보류 · 반등 확인 필요';
+  if (current <= entry * 1.01) return `오늘 행동: 1차 진입가 근처 · 분할 진입 가능 · 승률 ${win.toFixed(0)}%`;
+  if (current > entry * 1.045) return `오늘 행동: 이미 상승 구간 · 추격매수 금지 · ${money(entry, s.market)} 부근 대기`;
+  if (target > 0 && current >= target * 0.96) return '오늘 행동: 목표가 근처 · 신규 진입보다 수익 실현 계획 우선';
+  return s.action_text || `오늘 행동: 1차 진입가 ${money(entry, s.market)} 근처까지 대기`;
+}
 
-    if (!code || !avg || avg <= 0 || !amount || amount <= 0) {
-      alert('종목코드, 평단가, 수량을 확인해줘.');
-      return;
-    }
 
-    setItems((prev) => [
-      {
-        id: `${code}-${Date.now()}`,
-        symbol: code,
-        avgPrice: avg,
-        qty: amount,
-      },
-      ...prev,
-    ]);
+function getActionTone(s: Stock) {
+  const cat = getCategory(s);
+  const side = String(s.side || 'LONG').toUpperCase();
+  const isShort = cat === 'FUTURES' && side === 'SHORT';
+  const current = num(s.price);
+  const entry = num(s.entry_price, current);
+  const stop = num(s.stop_price);
+  const target = num(s.target_price);
+  if (!current || !entry) return 'wait';
+  if (isShort) {
+    if (target > 0 && current <= target * 1.03) return 'danger';
+    if (current >= entry * 0.995) return 'buy';
+    return 'wait';
+  }
+  if (stop > 0 && current <= stop * 1.025) return 'danger';
+  if (target > 0 && current >= target * 0.96) return 'danger';
+  if (current <= entry * 1.01) return 'buy';
+  return 'wait';
+}
 
-    setSymbol('');
-    setAvgPrice('');
-    setQty('');
-  };
+function getActionToneLabel(s: Stock) {
+  const tone = getActionTone(s);
+  if (tone === 'buy') return '진입 가능';
+  if (tone === 'danger') return '주의';
+  return '대기';
+}
 
-  const analyzedItems = items.map((item) => {
-    const stock = findStock(item.symbol);
-    const currentValue = stock ? stock.price * item.qty : 0;
-    const buyValue = item.avgPrice * item.qty;
-    const pnlMoney = stock ? currentValue - buyValue : 0;
-    const pnlPct = stock && buyValue ? (pnlMoney / buyValue) * 100 : 0;
-    return { item, stock, currentValue, buyValue, pnlMoney, pnlPct };
-  });
+function shouldFillOrder(p: PaperTrade, currentPrice: number) {
+  if (p.status !== 'PENDING' || !Number.isFinite(currentPrice) || currentPrice <= 0) return false;
+  const isShort = String(p.side).toUpperCase() === 'SHORT';
+  return isShort ? currentPrice >= p.requestedPrice : currentPrice <= p.requestedPrice;
+}
 
-  const totalBuy = analyzedItems.reduce((sum, row) => sum + row.buyValue, 0);
-  const totalValue = analyzedItems.reduce((sum, row) => sum + row.currentValue, 0);
-  const totalPnl = totalValue - totalBuy;
-  const totalPnlPct = totalBuy ? (totalPnl / totalBuy) * 100 : 0;
+function calcPnlPct(p: PaperTrade, currentPrice: number) {
+  const base = p.fillPrice || p.requestedPrice;
+  if (!base || base <= 0) return 0;
+  const isShort = String(p.side).toUpperCase() === 'SHORT';
+  return (isShort ? (base - currentPrice) / base : (currentPrice - base) / base) * 100;
+}
 
-  const moneyFmt = (n: number, market?: string) => {
-    if (!Number.isFinite(n)) return '-';
-    return market === 'US'
-      ? `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-      : `${Math.round(n).toLocaleString()}원`;
-  };
+function stockKey(s: Stock) {
+  return `${getCategory(s)}-${s.symbol}-${String(s.side || 'LONG').toUpperCase()}`;
+}
 
-  const portfolioDecision = (stock: Stock | undefined, pnlPct: number) => {
-    if (!stock) return '데이터 대기';
-    const signal = getSignal(stock);
-    const plan = getTradePlan(stock);
-    if (pnlPct <= -8 && (stock.score < 70 || signal.tone === 'danger')) return '손절/비중축소 우선';
-    if (pnlPct >= 15 && plan.targetGap < 5) return '절반 익절 유리';
-    if (pnlPct >= 10 && signal.tone === 'danger') return '수익 보호 우선';
-    if (stock.score >= 85 && signal.tone !== 'danger') return '강한 보유';
-    if (stock.score >= 70) return '보유 우위';
-    if (stock.score >= 60) return '주의 관찰';
-    return '비중 축소 검토';
-  };
-
-  return (
-    <div className="card">
-      <h2>📊 포트폴리오</h2>
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1.2fr 1fr 1fr',
-          gap: 8,
-          marginBottom: 8,
-        }}
-      >
-        <input
-          list="alpha-radar-stock-list"
-          placeholder="종목코드/이름"
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          style={{
-            padding: 10,
-            borderRadius: 10,
-            border: '1px solid rgba(255,255,255,0.12)',
-            background: '#0b1220',
-            color: '#fff',
-            minWidth: 0,
-          }}
-        />
-        <input
-          placeholder="평단가"
-          value={avgPrice}
-          onChange={(e) => setAvgPrice(e.target.value)}
-          style={{
-            padding: 10,
-            borderRadius: 10,
-            border: '1px solid rgba(255,255,255,0.12)',
-            background: '#0b1220',
-            color: '#fff',
-            minWidth: 0,
-          }}
-        />
-        <input
-          placeholder="수량"
-          value={qty}
-          onChange={(e) => setQty(e.target.value)}
-          style={{
-            padding: 10,
-            borderRadius: 10,
-            border: '1px solid rgba(255,255,255,0.12)',
-            background: '#0b1220',
-            color: '#fff',
-            minWidth: 0,
-          }}
-        />
-      </div>
-
-      <datalist id="alpha-radar-stock-list">
-        {stocks.map((s) => (
-          <option key={`pf-option-${s.market}-${s.symbol}`} value={s.symbol}>
-            {s.name} · {s.market}
-          </option>
-        ))}
-      </datalist>
-
-      <button className="tab" onClick={addItem} style={{ width: '100%', marginBottom: 12 }}>
-        보유종목 추가
-      </button>
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr 1fr',
-          gap: 8,
-          marginBottom: 12,
-        }}
-      >
-        <div className="num">
-          <span>투입금</span>
-          <b>{items.length ? Math.round(totalBuy).toLocaleString() : '-'}</b>
-        </div>
-        <div className="num">
-          <span>평가금</span>
-          <b>{items.length ? Math.round(totalValue).toLocaleString() : '-'}</b>
-        </div>
-        <div className="num">
-          <span>총 손익률</span>
-          <b style={{ color: totalPnl >= 0 ? '#22c55e' : '#ef4444' }}>
-            {items.length ? `${totalPnlPct.toFixed(2)}%` : '-'}
-          </b>
-        </div>
-      </div>
-
-      {items.length === 0 && (
-        <div className="item">
-          <b>보유종목 등록 준비중</b>
-          <span className="muted">종목코드와 평단가를 입력하면 수익률과 AI 재평가가 표시됩니다.</span>
-        </div>
-      )}
-
-      {analyzedItems.map(({ item, stock, currentValue, buyValue, pnlMoney, pnlPct }) => {
-        const positive = pnlMoney >= 0;
-        const targetPct = stock && item.avgPrice ? ((stock.target_price - item.avgPrice) / item.avgPrice) * 100 : 0;
-        const stopPct = stock && item.avgPrice ? ((stock.stop_price - item.avgPrice) / item.avgPrice) * 100 : 0;
-
-        return (
-          <div
-            key={item.id}
-            className={positive ? 'item good' : 'item warn'}
-            style={{ marginBottom: 10 }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-              <b>{stock ? `${stock.name} · ${stock.symbol}` : item.symbol}</b>
-              <b style={{ color: positive ? '#22c55e' : '#ef4444' }}>
-                {stock ? `${pnlPct.toFixed(2)}%` : '분석 대기'}
-              </b>
-            </div>
-
-            <span className="muted">
-              평단 {item.avgPrice.toLocaleString()} · 수량 {item.qty.toLocaleString()} · 현재{' '}
-              {stock ? fmt(stock.price, stock.market) : '데이터 없음'}
-            </span>
-
-            <span className="muted">
-              매입 {moneyFmt(buyValue, stock?.market)} · 평가 {stock ? moneyFmt(currentValue, stock.market) : '-'} · 손익{' '}
-              {stock ? moneyFmt(pnlMoney, stock.market) : '-'}
-            </span>
-
-            {stock && (
-              <span className="muted">
-                AI 재평가: {portfolioDecision(stock, pnlPct)} · {stock.grade ?? 'C'} Grade · 목표까지{' '}
-                {targetPct.toFixed(1)}% · 손절선 {stopPct.toFixed(1)}%
-              </span>
-            )}
-
-            <button
-              onClick={() => setItems((prev) => prev.filter((x) => x.id !== item.id))}
-              style={{
-                marginTop: 8,
-                padding: '6px 10px',
-                borderRadius: 8,
-                border: 0,
-                background: '#374151',
-                color: '#fff',
-                cursor: 'pointer',
-              }}
-            >
-              삭제
-            </button>
-          </div>
-        );
-      })}
-    </div>
-  );
+function tradeKey(p: PaperTrade) {
+  return `${p.category}-${p.symbol}-${String(p.side || 'LONG').toUpperCase()}`;
 }
 
 export default function Page() {
   const [stocks, setStocks] = useState<Stock[]>(demo);
-  const [tab, setTab] = useState('ALL');
+  const [activeTab, setActiveTab] = useState<MainTab>('PICKS');
+  const [activeCat, setActiveCat] = useState<Category>('US');
   const [sel, setSel] = useState<Stock>(demo[0]);
-  const [mode, setMode] = useState(hasSupabase ? 'Cloud 연결' : 'Demo 모드');
   const [query, setQuery] = useState('');
-  const [watchSymbols, setWatchSymbols] = useState<string[]>([]);
-  const [beginnerMode, setBeginnerMode] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
-  const detailRef = useRef<HTMLDivElement | null>(null);
+  const [mode, setMode] = useState(hasSupabase ? 'Cloud 연결' : 'Demo 모드');
+  const [lastUpdated, setLastUpdated] = useState('');
+  const [user, setUser] = useState<any>(null);
+  const [trades, setTrades] = useState<PaperTrade[]>([]);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
+  const [paperEntry, setPaperEntry] = useState('');
+  const [paperQty, setPaperQty] = useState('1');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authMessage, setAuthMessage] = useState('');
+  const [showAuth, setShowAuth] = useState(false);
+  const [paperMode, setPaperMode] = useState<'HOLD' | 'PENDING' | 'CLOSED'>('HOLD');
+  const searchRef = useRef<HTMLInputElement | null>(null);
 
-  const selectStock = (stock: Stock) => {
-    setSel(stock);
-    window.setTimeout(() => {
-      detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 50);
+  const selectedEntry = num(String(paperEntry).replace(/,/g, ''), num(sel.entry_price, sel.price));
+  const selectedQty = num(String(paperQty).replace(/,/g, ''), 1);
+  const selectedCategory = getCategory(sel);
+  const entryGuide = getEntryGuide(sel, selectedEntry);
+
+  const upsertProfile = async (u: any) => {
+    if (!hasSupabase || !supabase || !u) return;
+    await supabase.from('profiles').upsert({
+      id: u.id,
+      email: u.email,
+      display_name: u.user_metadata?.full_name || u.email?.split('@')[0] || 'Alpha Trader',
+      avatar_url: u.user_metadata?.avatar_url || null,
+      updated_at: new Date().toISOString(),
+    });
+  };
+
+  const validateAuthForm = () => {
+    const email = authEmail.trim();
+    if (!email || !authPassword) {
+      alert('이메일과 비밀번호를 입력해줘.');
+      return null;
+    }
+    if (authPassword.length < 6) {
+      alert('비밀번호는 최소 6자 이상이어야 해.');
+      return null;
+    }
+    return { email, password: authPassword };
+  };
+
+  const signInEmail = async () => {
+    if (!hasSupabase || !supabase) return alert('Supabase 연결이 필요합니다.');
+    const form = validateAuthForm();
+    if (!form) return;
+    setAuthBusy(true);
+    setAuthMessage('');
+    const { error } = await supabase.auth.signInWithPassword(form);
+    if (error) {
+      alert(error.message);
+    } else {
+      setAuthMessage('로그인 완료');
+      setShowAuth(false);
+    }
+    setAuthBusy(false);
+  };
+
+  const signUpEmail = async () => {
+    if (!hasSupabase || !supabase) return alert('Supabase 연결이 필요합니다.');
+    const form = validateAuthForm();
+    if (!form) return;
+    setAuthBusy(true);
+    setAuthMessage('');
+    const { data, error } = await supabase.auth.signUp({
+      email: form.email,
+      password: form.password,
+      options: { data: { full_name: form.email.split('@')[0] } },
+    });
+    if (error) {
+      alert(error.message);
+    } else {
+      setAuthMessage(data.session ? '회원가입 및 로그인 완료' : '회원가입 완료. 바로 로그인을 눌러줘.');
+      if (data.session) setShowAuth(false);
+    }
+    setAuthBusy(false);
+  };
+
+  const signOut = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setUser(null);
+    setTrades([]);
+    setShowAuth(false);
+  };
+
+  const loadLeaderboard = async () => {
+    if (!hasSupabase || !supabase) return;
+    const { data } = await supabase.from('paper_trade_leaderboard').select('*').order('win_rate', { ascending: false }).limit(20);
+    if (data) setLeaderboard(data as LeaderboardRow[]);
+  };
+
+  const loadPaperTrades = async (uid?: string) => {
+    if (!hasSupabase || !supabase || !uid) {
+      setTrades([]);
+      return;
+    }
+    const { data, error } = await supabase.from('paper_trades').select('*').eq('user_id', uid).order('created_at', { ascending: false }).limit(500);
+    if (error) {
+      console.error('paper_trades load error:', error);
+      return;
+    }
+    const mapped: PaperTrade[] = (data || []).map((r: any) => ({
+      id: String(r.id), user_id: String(r.user_id), symbol: String(r.symbol), name: String(r.name || r.symbol), market: String(r.market || ''),
+      category: String(r.category || 'US') as Category, side: String(r.side || 'LONG'), status: String(r.status || 'PENDING') as PaperStatus,
+      requestedPrice: num(r.requested_price), fillPrice: r.fill_price == null ? undefined : num(r.fill_price), closePrice: r.close_price == null ? undefined : num(r.close_price),
+      qty: num(r.qty, 1), pnlPct: r.pnl_pct == null ? undefined : num(r.pnl_pct), pnlMoney: r.pnl_money == null ? undefined : num(r.pnl_money),
+      createdAt: String(r.created_at || new Date().toISOString()), filledAt: r.filled_at || undefined, closedAt: r.closed_at || undefined,
+    }));
+    setTrades(mapped);
   };
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('alphaRadarWatchlist');
-      if (saved) setWatchSymbols(JSON.parse(saved));
-    } catch {}
+    if (!hasSupabase || !supabase) return;
+    supabase.auth.getSession().then(({ data }) => {
+      const u = data.session?.user ?? null;
+      setUser(u);
+      if (u) {
+        upsertProfile(u);
+        loadPaperTrades(u.id);
+        loadLeaderboard();
+      }
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
+      const u = session?.user ?? null;
+      setUser(u);
+      if (u) {
+        upsertProfile(u);
+        loadPaperTrades(u.id);
+        loadLeaderboard();
+      } else {
+        setTrades([]);
+      }
+    });
+    return () => sub.subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('alphaRadarWatchlist', JSON.stringify(watchSymbols));
-  }, [watchSymbols]);
+    const entry = num(sel.entry_price, sel.price);
+    setPaperEntry(entry > 0 ? String(entry) : '');
+    setPaperQty('1');
+  }, [sel.symbol, sel.market, sel.entry_price, sel.price]);
+
+  useEffect(() => {
+    if (activeTab === 'SEARCH') {
+      const t = setTimeout(() => searchRef.current?.focus(), 120);
+      return () => clearTimeout(t);
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     async function load(keepSelection = false) {
       if (!hasSupabase || !supabase) return;
-      const { data, error } = await supabase.from('rankings').select('*').order('score', { ascending: false }).limit(120);
+      const { data, error } = await supabase.from('rankings').select('*').order('score', { ascending: false }).limit(1500);
       if (error) {
         console.error('Supabase rankings load error:', error);
         setMode('Supabase 오류');
         return;
       }
       if (data && data.length) {
-        const mapped = data.map((r: any) => ({
-          symbol: String(r.symbol ?? '').trim(), name: String(r.name ?? '').trim(), market: String(r.market ?? '').trim().toUpperCase(), score: Number(r.score ?? 0), grade: r.grade ?? 'C',
-          price: Number(r.price ?? 0), entry_price: Number(r.entry_price ?? 0), stop_price: Number(r.stop_price ?? 0), target_price: Number(r.target_price ?? 0),
+        const mapped: Stock[] = data.map((r: any) => ({
+          symbol: String(r.symbol ?? '').trim(),
+          name: String(r.name ?? '').trim() || String(r.symbol ?? '').trim(),
+          market: String(r.market ?? '').trim().toUpperCase(),
+          score: num(r.score), grade: r.grade ?? 'C', price: num(r.price), entry_price: num(r.entry_price), stop_price: num(r.stop_price), target_price: num(r.target_price),
           reason: r.reason ?? '', beginner_note: r.beginner_note ?? '', change_text: r.change_text ?? '관찰', decision: r.decision ?? '관망', risk_level: r.risk_level ?? '보통', action_text: r.action_text ?? '추가 확인 필요',
-          trend_score: Number(r.trend_score ?? 0), volume_score: Number(r.volume_score ?? 0), news_score: Number(r.news_score ?? 0), earnings_score: Number(r.earnings_score ?? 0), flow_score: Number(r.flow_score ?? 0), risk_score: Number(r.risk_score ?? 0),
+          trend_score: num(r.trend_score), volume_score: num(r.volume_score), news_score: num(r.news_score), earnings_score: num(r.earnings_score), flow_score: num(r.flow_score), risk_score: num(r.risk_score), timing_score: num(r.timing_score),
+          win_rate: num(r.win_rate), expected_return: num(r.expected_return), loss_risk: num(r.loss_risk), final_score: num(r.final_score), confidence_grade: r.confidence_grade ?? '',
+          asset_class: r.asset_class ?? '', trade_type: r.trade_type ?? '', side: r.side ?? '',
         }));
+        mapped.sort((a, b) => profitScore(b) - profitScore(a));
         setStocks(mapped);
         setSel((prev) => {
-          if (!keepSelection) return mapped[0];
-          return mapped.find((x: Stock) => x.market === prev.market && x.symbol === prev.symbol) ?? mapped[0];
+          if (!keepSelection) return mapped.find((s) => getCategory(s) === activeCat) ?? mapped[0];
+          return mapped.find((x) => x.symbol === prev.symbol && getCategory(x) === getCategory(prev) && String(x.side || 'LONG') === String(prev.side || 'LONG')) ?? prev;
         });
         setMode('Supabase 실시간 연결');
         setLastUpdated(new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }));
@@ -631,112 +490,390 @@ export default function Page() {
     return () => clearInterval(timer);
   }, []);
 
-  const marketCounts = useMemo(() => ({
-    ALL: stocks.length,
-    US: stocks.filter((s) => s.market === 'US').length,
-    KR: stocks.filter((s) => s.market === 'KR').length,
-  }), [stocks]);
+  useEffect(() => {
+    const check = async () => {
+      if (!user || !hasSupabase || !supabase || trades.length === 0) return;
+      const pending = trades.filter((p) => p.status === 'PENDING');
+      for (const p of pending) {
+        const stock = stocks.find((s) => s.symbol === p.symbol && getCategory(s) === p.category && String(s.side || 'LONG').toUpperCase() === String(p.side || 'LONG').toUpperCase());
+        const cur = stock?.price || 0;
+        if (shouldFillOrder(p, cur)) {
+          const now = new Date().toISOString();
+          await supabase.from('paper_trades').update({ status: 'FILLED', fill_price: cur, filled_at: now, updated_at: now }).eq('id', p.id).eq('user_id', user.id);
+          await supabase.from('paper_trade_events').insert({ trade_id: p.id, user_id: user.id, event_type: 'FILLED', price: cur, qty: p.qty, note: '가격 도달 자동체결' });
+          await loadPaperTrades(user.id);
+          await loadLeaderboard();
+        }
+      }
+    };
+    check();
+  }, [stocks, trades, user]);
 
-  const ranked = stocks
-    .filter((s) => tab === 'ALL' || s.market === tab)
-    .sort((a, b) => {
-      const ap = getTradePlan(a);
-      const bp = getTradePlan(b);
-      return beginnerMode ? bp.timingScore - ap.timingScore : b.score - a.score;
+  const topByCat = useMemo(() => {
+    const out: Record<Category, Stock[]> = { US: [], KR: [], COIN: [], FUTURES: [] };
+    CATS.forEach((c) => {
+      out[c.id] = stocks.filter((s) => getCategory(s) === c.id).sort((a, b) => profitScore(b) - profitScore(a)).slice(0, 10);
     });
+    return out;
+  }, [stocks]);
 
-  // v3.4: 초보자 모드에서도 한국/미국 TOP7이 비어 보이지 않게 한다.
-  // 먼저 매수금지 아닌 종목을 우선 표시하고, 7개가 부족하면 관망/매수금지도 뒤에 채운다.
-  const preferred = beginnerMode ? ranked.filter((s) => getSignal(s).tone !== 'danger') : ranked;
-  const fallback = beginnerMode ? ranked.filter((s) => getSignal(s).tone === 'danger') : [];
-  const filtered = [...preferred, ...fallback].slice(0, 7);
+  const ranked = topByCat[activeCat];
 
   const searchResults = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    return stocks.filter((s) => s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)).slice(0, 20);
+    return stocks.filter((s) => s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)).sort((a, b) => profitScore(b) - profitScore(a)).slice(0, 60);
   }, [query, stocks]);
 
-  const watchlist = stocks.filter((s) => watchSymbols.includes(`${s.market}-${s.symbol}`));
-  const toggleWatch = (s: Stock) => {
-    const key = `${s.market}-${s.symbol}`;
-    setWatchSymbols((prev) => prev.includes(key) ? prev.filter((x) => x !== key) : [key, ...prev]);
-  };
-  const isWatched = watchSymbols.includes(`${sel.market}-${sel.symbol}`);
+  const counts = useMemo(() => ({
+    US: stocks.filter((s) => getCategory(s) === 'US').length,
+    KR: stocks.filter((s) => getCategory(s) === 'KR').length,
+    COIN: stocks.filter((s) => getCategory(s) === 'COIN').length,
+    FUTURES: stocks.filter((s) => getCategory(s) === 'FUTURES').length,
+  }), [stocks]);
 
-  const fmt = (n: number, m: string) => m === 'KR' ? `${Math.round(n).toLocaleString()}원` : `$${Number(n).toLocaleString()}`;
-  const gradeColor = (grade?: string) => {
-    if (grade === 'S') return '#ff2d2d';
-    if (grade === 'A') return '#ff6b35';
-    if (grade === 'B') return '#ffd166';
-    if (grade === 'C') return '#8ecae6';
-    return '#999';
+  const activeTrades = trades.filter((p) => p.status === 'FILLED');
+  const pendingTrades = trades.filter((p) => p.status === 'PENDING');
+  const closedTrades = trades.filter((p) => p.status === 'CLOSED');
+
+  const portfolioRows = useMemo(() => activeTrades.map((p) => {
+    const stock = stocks.find((s) => s.symbol === p.symbol && getCategory(s) === p.category && String(s.side || 'LONG').toUpperCase() === String(p.side || 'LONG').toUpperCase());
+    const cur = stock?.price ?? p.fillPrice ?? p.requestedPrice;
+    const pnlPct = calcPnlPct(p, cur);
+    const base = p.fillPrice || p.requestedPrice;
+    const pnlMoney = (pnlPct / 100) * base * p.qty;
+    return { p, stock, cur, pnlPct, pnlMoney };
+  }), [activeTrades, stocks]);
+
+  const totalValue = portfolioRows.reduce((a, r) => a + r.cur * r.p.qty, 0);
+  const totalCost = portfolioRows.reduce((a, r) => a + (r.p.fillPrice || r.p.requestedPrice) * r.p.qty, 0);
+  const totalPnl = portfolioRows.reduce((a, r) => a + r.pnlMoney, 0);
+  const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+  const closedWinRate = closedTrades.length ? (closedTrades.filter((t) => num(t.pnlPct) > 0).length / closedTrades.length) * 100 : 0;
+
+  const openOrder = async (s: Stock, requestPrice: number, qty: number) => {
+    if (!user) return alert('먼저 로그인해주세요.');
+    if (!hasSupabase || !supabase) return alert('Supabase 연결이 필요합니다.');
+    const cat = getCategory(s);
+    const existing = activeTrades.filter((p) => p.category === cat).length + pendingTrades.filter((p) => p.category === cat).length;
+    if (existing >= maxPositions(cat)) return alert(`${categoryName(cat)} 모의투자는 대기+보유 합산 최대 ${maxPositions(cat)}개입니다.`);
+    if (!requestPrice || requestPrice <= 0 || !qty || qty <= 0) return alert('진입가와 수량을 확인해줘.');
+    const side = cat === 'FUTURES' ? String(s.side || 'LONG').toUpperCase() : 'LONG';
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('paper_trades').insert({
+      user_id: user.id, symbol: s.symbol, name: s.name, market: s.market, category: cat, side,
+      status: 'PENDING', requested_price: requestPrice, qty, created_at: now, updated_at: now,
+    });
+    if (error) return alert(error.message);
+    await loadPaperTrades(user.id);
+    setActiveTab('PAPER');
   };
 
-  return (
-    <main className="wrap">
-      <div className="top">
-        <div className="brand"><h1>Alpha Radar AI</h1><p>Made by YHJ · v3.5 Scroll + 5s Auto Refresh</p><p>실시간 데이터 · 진입 타이밍 · 초보자 행동 가이드 · 손익비 자동 계산</p></div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}><button className="tab" onClick={() => setBeginnerMode((v) => !v)}>{beginnerMode ? '👶 초보자 모드 ON' : '⚡ 전체 모드'}</button><div className="badge">{mode}{lastUpdated ? ` · ${lastUpdated}` : ''}</div></div>
+  const closeTrade = async (p: PaperTrade) => {
+    if (!user || !hasSupabase || !supabase) return;
+    const stock = stocks.find((s) => s.symbol === p.symbol && getCategory(s) === p.category && String(s.side || 'LONG').toUpperCase() === String(p.side || 'LONG').toUpperCase());
+    const cur = stock?.price ?? p.fillPrice ?? p.requestedPrice;
+    const pnlPct = calcPnlPct(p, cur);
+    const base = p.fillPrice || p.requestedPrice;
+    const pnlMoney = (pnlPct / 100) * base * p.qty;
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('paper_trades').update({ status: 'CLOSED', close_price: cur, pnl_pct: pnlPct, pnl_money: pnlMoney, closed_at: now, updated_at: now }).eq('id', p.id).eq('user_id', user.id);
+    if (error) return alert(error.message);
+    await supabase.from('paper_trade_events').insert({ trade_id: p.id, user_id: user.id, event_type: 'CLOSED', price: cur, qty: p.qty, pnl_pct: pnlPct, pnl_money: pnlMoney, note: '사용자 모의청산' });
+    await loadPaperTrades(user.id);
+    await loadLeaderboard();
+  };
+
+  const cancelTrade = async (p: PaperTrade) => {
+    if (!user || !hasSupabase || !supabase) return;
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('paper_trades').update({ status: 'CANCELED', updated_at: now }).eq('id', p.id).eq('user_id', user.id);
+    if (error) return alert(error.message);
+    await supabase.from('paper_trade_events').insert({ trade_id: p.id, user_id: user.id, event_type: 'CANCELED', price: p.requestedPrice, qty: p.qty, note: '사용자 주문취소' });
+    await loadPaperTrades(user.id);
+  };
+
+  const selectStock = (s: Stock) => {
+    setSel(s);
+    setActiveCat(getCategory(s));
+    setActiveTab('DETAIL');
+  };
+
+  const Header = () => (
+    <header className="topbar">
+      <button className="backBtn" onClick={() => setActiveTab('PICKS')} aria-label="home">‹</button>
+      <div className="brand">
+        <b>Alpha Radar AI</b>
+        <em>Made By YHJ</em>
+        <span><i />{mode} {lastUpdated ? `· ${lastUpdated}` : ''}</span>
+      </div>
+      {user ? <button className="userBtn" onClick={signOut}>👤 {user.email?.split('@')[0]} · 로그아웃</button> : <button className="paperTop" onClick={() => setShowAuth(true)}>로그인</button>}
+      <button className="menuBtn" onClick={() => { setActiveTab('SEARCH'); setTimeout(() => searchRef.current?.focus(), 100); }}>☰</button>
+    </header>
+  );
+
+  const AuthPanel = ({ compact = false }: { compact?: boolean }) => (
+    <div className={compact ? 'authPanel compact' : 'authPanel'}>
+      <div className="sectionTitle"><b>로그인</b><span>이메일 + 비밀번호</span></div>
+      <div className="authInputs">
+        <input
+          type="email"
+          value={authEmail}
+          onChange={(e) => setAuthEmail(e.target.value)}
+          placeholder="이메일"
+          autoComplete="email"
+        />
+        <input
+          type="password"
+          value={authPassword}
+          onChange={(e) => setAuthPassword(e.target.value)}
+          placeholder="비밀번호 6자 이상"
+          autoComplete="current-password"
+          onKeyDown={(e) => { if (e.key === 'Enter') signInEmail(); }}
+        />
+      </div>
+      {authMessage && <p className="authMsg">{authMessage}</p>}
+      <div className="authActions">
+        <button className="primary" onClick={signInEmail} disabled={authBusy}>{authBusy ? '처리중...' : '로그인'}</button>
+        <button className="ghostBtn" onClick={signUpEmail} disabled={authBusy}>회원가입</button>
+      </div>
+      <p className="authHint">메일 인증번호 없이 이메일/비밀번호로 로그인합니다. 한 번 로그인하면 세션이 유지됩니다.</p>
+    </div>
+  );
+
+  const BottomNav = () => (
+    <nav className="bottomNav">
+      <button className={activeTab === 'PICKS' ? 'on' : ''} onClick={() => setActiveTab('PICKS')}>⌂<span>홈</span></button>
+      <button className={activeTab === 'SEARCH' ? 'on' : ''} onClick={() => { setActiveTab('SEARCH'); setTimeout(() => searchRef.current?.focus(), 120); }}>⌕<span>검색</span></button>
+      <button className={activeTab === 'DETAIL' ? 'on' : ''} onClick={() => setActiveTab('DETAIL')}>◇<span>상세</span></button>
+      <button className={activeTab === 'PAPER' ? 'on paperNav' : 'paperNav'} onClick={() => setActiveTab('PAPER')}>◔{pendingTrades.length > 0 && <i className="navBadge">{pendingTrades.length}</i>}<span>모의투자</span></button>
+      <button className={activeTab === 'HISTORY' ? 'on' : ''} onClick={() => setActiveTab('HISTORY')}>♙<span>마이페이지</span></button>
+    </nav>
+  );
+
+  const StockCard = ({ s, i }: { s: Stock; i: number }) => {
+    const cat = getCategory(s);
+    return (
+      <button className="stockCard topCard" onClick={() => selectStock(s)}>
+        <strong className="rankNo">{i + 1}</strong>
+        <div className="stockMain">
+          <div className="stockTitleRow"><b>{s.name}</b><span className={`marketTag ${cat.toLowerCase()}`}>{marketBadge(cat)}</span></div>
+          <span>{s.symbol} · {categoryName(cat)} · {sideLabel(s)}</span>
+          <em>{s.grade || s.confidence_grade || 'B'} Grade · 확률점수 {Math.round(profitScore(s))}</em>
+        </div>
+        <div className="stockNums"><b>{derivedWinRate(s).toFixed(0)}%</b><span>{pct(derivedExpectedReturn(s))}</span></div>
+      </button>
+    );
+  };
+
+  const PicksView = () => (
+    <section className="screen">
+      <div className="heroCard">
+        <div><span className="muted">{mode} {lastUpdated ? `· ${lastUpdated}` : ''}</span><h1>오늘의 수익 후보 TOP10</h1><p>화면에는 핵심 10개만, 검색은 전체 종목에서 찾습니다.</p></div>
+        <button className="paperTop big" onClick={() => setActiveTab('PAPER')}>💼 모의투자</button>
+      </div>
+      <div className="catTabs">{CATS.map((c) => <button key={c.id} className={activeCat === c.id ? 'on' : ''} onClick={() => setActiveCat(c.id)}>{c.label}</button>)}</div>
+      <div className="listCards">{ranked.map((s, i) => <StockCard key={`${stockKey(s)}-${i}`} s={s} i={i} />)}</div>
+    </section>
+  );
+
+  const SearchView = () => (
+    <section className="screen searchScreen">
+      <h1>종목 검색</h1>
+      <input
+        ref={searchRef}
+        className="searchInput"
+        value={query}
+        autoFocus
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="예: NVDA, TSLA, 삼성전자, BTC"
+      />
+      <p className="hint">검색 탭에서는 타이핑 중 화면이 이동하지 않도록 고정했습니다. 순위 밖 종목도 검색됩니다.</p>
+      <div className="listCards searchResults">{searchResults.map((s, i) => <StockCard key={`${stockKey(s)}-search-${i}`} s={s} i={i} />)}</div>
+      {!query && <div className="empty">검색어를 입력해줘.</div>}
+      {query && searchResults.length === 0 && <div className="empty">검색 결과 없음. 엔진 universe에 추가가 필요할 수 있음.</div>}
+    </section>
+  );
+
+  const DetailView = () => (
+    <section className="screen detailScreen">
+      <div className="stockHero">
+        <div className="heroLeft">
+          <h1>{sel.name}</h1>
+          <p>{sel.symbol} · {categoryName(selectedCategory)} · {sideLabel(sel)}</p>
+          <div className="judgementRow"><span>AI 판단</span><b>승률 {derivedWinRate(sel).toFixed(0)}%</b></div>
+          <em>{sel.decision || '관찰'} · AI 모델 3.2</em>
+        </div>
+        <div className="pricePanel">
+          <span>현재가</span>
+          <b>{money(sel.price, sel.market)}</b>
+          <strong className={parsePct(sel.change_text) >= 0 ? 'green' : 'red'}>{sel.change_text || '실시간'}</strong>
+          <div className="spark"><i /></div>
+        </div>
       </div>
 
-      <section className="grid">
-        <div className="card">
-          <h2>🏆 오늘의 TOP7</h2><div className="item good" style={{ marginBottom: 12 }}><b>{beginnerMode ? '👶 초보자 수익 모드' : '⚡ 전체 랭킹 모드'}</b><span className="muted">{beginnerMode ? '추천 종목을 우선 표시하고, 부족하면 관망/금지 종목도 뒤에 채워 TOP7을 유지합니다.' : '전체 종목을 AI 점수 순서로 보여줍니다.'}</span></div>
-          <div style={{ position: 'relative', marginBottom: 12 }}>
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="종목 검색: NVDA, 삼성전자, 한화오션" style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', background: '#0b1220', color: '#fff', boxSizing: 'border-box' }} />
-            {searchResults.length > 0 && (
-              <div style={{ position: 'absolute', zIndex: 10, left: 0, right: 0, top: 48, background: '#111827', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, overflow: 'hidden' }}>
-                {searchResults.map((s) => (
-                  <div key={`search-${s.market}-${s.symbol}`} onClick={() => { selectStock(s); setQuery(''); }} style={{ padding: 10, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    <b>{s.name} · {s.symbol}</b><span className="muted">{s.market} · {s.score}점</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+      <div className={`actionStrip ${getActionTone(sel)}`}>
+        <span>{getActionToneLabel(sel)}</span>
+        <b>{getTodayAction(sel)}</b>
+      </div>
 
-          <div className="tabs"><button className="tab" onClick={() => setTab('ALL')}>전체 {marketCounts.ALL}</button><button className="tab" onClick={() => setTab('US')}>미국 {marketCounts.US}</button><button className="tab" onClick={() => setTab('KR')}>한국 {marketCounts.KR}</button></div>
+      <div className="metricGrid premiumMetrics">
+        <div><span>목표가</span><b className="green">{money(sel.target_price, sel.market)}</b></div>
+        <div><span>손절가</span><b className="red">{money(sel.stop_price, sel.market)}</b></div>
+        <div><span>기대수익</span><b>{pct(derivedExpectedReturn(sel))}</b></div>
+        <div><span>신뢰도</span><b>{(s => s === 'S' ? '5.0' : s === 'A' ? '4.5' : s === 'B' ? '4.0' : '3.5')(String(sel.confidence_grade || sel.grade || 'B').toUpperCase())} / 5.0</b></div>
+      </div>
 
-          {filtered.map((s, i) => {
-            const signal = getSignal(s);
-            const plan = getTradePlan(s);
-            return (
-              <div className="rank" key={`${s.market}-${s.symbol}`} onClick={() => selectStock(s)}>
-                <strong>{i + 1}</strong>
-                <div><b>{s.name}</b><div className="muted">{s.symbol} · {s.market}</div><div style={{ color: gradeColor(s.grade), fontSize: '12px', fontWeight: 'bold', marginTop: 2 }}>⭐ {s.grade ?? 'C'} Grade · 타이밍 {plan.timingScore}점</div></div>
-                <div className="score">{s.score}점</div><div className="pill">{signal.label}</div>
-              </div>
-            );
-          })}
+      <div className="entryBox premiumBox">
+        <div className="sectionTitle"><b>추천 진입가</b><span>분할 진입 전략</span></div>
+        <div className="entryMiniGrid">
+          {entryGuide.ranges.map((r) => <div className="entryMini" key={r.label}><span>{r.label} · {r.note}</span><b>{money(r.price, sel.market)}</b><em>진입 가능</em></div>)}
+        </div>
+      </div>
 
-          <div className="detail" ref={detailRef}>
-            <h3>{sel.name} 상세 분석</h3>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 }}>
-              <div style={{ color: gradeColor(sel.grade), fontWeight: 'bold', fontSize: '20px' }}>📈 Alpha Grade {sel.grade ?? 'C'}</div>
-              <button onClick={() => toggleWatch(sel)} style={{ padding: '8px 12px', borderRadius: 10, border: 0, background: isWatched ? '#f59e0b' : '#374151', color: '#fff', fontWeight: 'bold' }}>{isWatched ? '★ 관심해제' : '☆ 관심추가'}</button>
-            </div>
-            <p className="muted">{sel.reason}</p>
-            <div className="nums"><div className="num"><span>현재가</span><b>{fmt(sel.price, sel.market)}</b></div><div className="num"><span>진입가</span><b>{fmt(sel.entry_price, sel.market)}</b></div><div className="num"><span>손절가</span><b>{fmt(sel.stop_price, sel.market)}</b></div><div className="num"><span>목표가</span><b>{fmt(sel.target_price, sel.market)}</b></div></div>
-            <div className="item" style={{ marginTop: 12 }}><b>🎯 AI 판단</b><span className="muted">{sel.decision || '관망'}</span></div>
-            <div className="item" style={{ marginTop: 8 }}><b>⚠️ 위험도</b><span className="muted">{sel.risk_level || '보통'}</span></div>
-            <div className="item good" style={{ marginTop: 8 }}><b>📌 행동 가이드</b><span className="muted">{sel.action_text || '추가 확인 필요'}</span></div>
-            <ActionPlanCard stock={sel} fmt={fmt} />
-            <p>💡 {sel.beginner_note}</p>
+      <div className="orderBox premiumBox compactOrder">
+        <div className="sectionTitle"><b>모의투자 주문</b><span>{selectedCategory === 'FUTURES' && String(sel.side).toUpperCase() === 'SHORT' ? 'SHORT 예약' : 'LONG/현물 예약'}</span></div>
+        <div className="orderInputs"><label>진입가<input value={paperEntry} onChange={(e) => setPaperEntry(e.target.value)} /></label><label>수량<input value={paperQty} onChange={(e) => setPaperQty(e.target.value)} /></label></div>
+        <button className="primary" onClick={() => openOrder(sel, selectedEntry, selectedQty)}>예약주문 등록</button>
+      </div>
+
+      <div className="analysisBox premiumBox">
+        <div className="sectionTitle"><b>AI 종합 분석</b><span>자세히 보기 ›</span></div>
+        <div className="analysisGrid">
+          <div><span>추세</span><b>상승 추세</b><span>모멘텀</span><b>강함</b><span>시장심리</span><b className="green">긍정적</b></div>
+          <div><span>거래량</span><b>증가</b><span>변동성</span><b>보통</b><span>리스크</span><b className="yellow">보통</b></div>
+        </div>
+        <div className="pointGrid">
+          <div><b>핵심 포인트</b><p>• 승률 {derivedWinRate(sel).toFixed(0)}% 구간 진입<br/>• 분할 진입으로 리스크 관리 권장<br/>• {sel.reason || sel.action_text || 'AI 분석 대기'}</p></div>
+          <div><b>주의 사항</b><p>• 시장 변동성 확대 구간 주의<br/>• 손절가 이탈 시 손실 최소화<br/>• 단기 급등 시 추격 매수 금지</p></div>
+        </div>
+        <div className="modelInfo"><span>업데이트<br/><b>{lastUpdated || '-'}</b></span><span>데이터 소스<br/><b>Supabase 실시간</b></span><span>모델 버전<br/><b>Alpha Radar v3.2</b></span></div>
+      </div>
+    </section>
+  );
+
+  const TradeRow = ({ row }: { row: { p: PaperTrade; stock?: Stock; cur: number; pnlPct: number; pnlMoney: number } }) => (
+    <div className="holdCard">
+      <div className="holdTop"><div><b>{row.p.name}</b><span>{row.p.symbol} · {categoryName(row.p.category)} · {row.p.side}</span></div><strong className={row.pnlPct >= 0 ? 'green' : 'red'}>{pct(row.pnlPct)}</strong></div>
+      <div className="holdMetrics"><span>진입 {money(row.p.fillPrice || row.p.requestedPrice, row.p.market)}</span><span>현재 {money(row.cur, row.p.market)}</span><span>손익 {row.pnlMoney >= 0 ? '+' : ''}{row.pnlMoney.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
+      <div className="holdActions"><button className="sell" onClick={() => closeTrade(row.p)}>매도/청산</button><button className="buy" onClick={() => { setSel(row.stock || sel); setPaperEntry(String(row.cur)); setActiveTab('DETAIL'); }}>추가매수</button></div>
+    </div>
+  );
+
+  const PaperView = () => (
+    <section className="screen paperScreen">
+      <div className="portfolioHero">
+        <div><h1>모의투자</h1><p>예약주문 · 보유종목 · 거래기록을 한 화면에서 관리합니다.</p></div>
+        <button className="paperTop" onClick={() => setActiveTab('PICKS')}>+ 종목 찾기</button>
+      </div>
+      {!user && <div className="loginBox"><b>로그인 필요</b><p>로그인 후 예약주문/거래기록이 Supabase에 저장됩니다.</p><AuthPanel compact /></div>}
+      <div className="paperDashboard premiumBox">
+        <div className="sectionTitle"><b>내 모의투자 성과</b><span>청산 완료 기준</span></div>
+        <div className="performanceHero">
+          <div><span>승률</span><b>{closedTrades.length ? `${closedWinRate.toFixed(1)}%` : '-'}</b><em>{closedTrades.length}건 완료</em></div>
+          <div><span>총손익</span><b className={totalPnl >= 0 ? 'green' : 'red'}>{totalPnl >= 0 ? '+' : ''}{totalPnl.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b><em>보유 기준</em></div>
+        </div>
+        <div className="summaryGrid paperSummary">
+          <div><span>평가금</span><b>{totalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b></div>
+          <div><span>평균수익</span><b className={avgClosedPnl >= 0 ? 'green' : 'red'}>{closedTrades.length ? pct(avgClosedPnl) : '-'}</b></div>
+          <div><span>최근10회</span><b>{recentTen.length ? `${recentWinRate.toFixed(1)}%` : '-'}</b></div>
+          <div><span>최고수익</span><b className="green">{closedTrades.length ? pct(bestClosedPnl) : '-'}</b></div>
+        </div>
+      </div>
+      <div className="paperTabs">
+        <button className={paperMode === 'HOLD' ? 'on' : ''} onClick={() => setPaperMode('HOLD')}>보유중 <b>{portfolioRows.length}</b></button>
+        <button className={paperMode === 'PENDING' ? 'on' : ''} onClick={() => setPaperMode('PENDING')}>대기주문 <b>{pendingTrades.length}</b></button>
+        <button className={paperMode === 'CLOSED' ? 'on' : ''} onClick={() => setPaperMode('CLOSED')}>거래기록 <b>{closedTrades.length}</b></button>
+      </div>
+      {paperMode === 'HOLD' && (portfolioRows.length ? portfolioRows.map((r) => <TradeRow key={r.p.id} row={r} />) : <div className="empty">보유 종목 없음</div>)}
+      {paperMode === 'PENDING' && (pendingTrades.length ? pendingTrades.map((p) => <div key={p.id} className="pendingCard"><div><b>{p.name}</b><span>{p.symbol} · 예약가 {money(p.requestedPrice, p.market)}</span></div><button onClick={() => cancelTrade(p)}>취소</button></div>) : <div className="empty">대기 주문 없음</div>)}
+      {paperMode === 'CLOSED' && (closedTrades.length ? closedTrades.map((p) => <div key={p.id} className="historyLine"><div><b>{p.name}</b><span>{p.symbol} · {categoryName(p.category)} · {p.side}</span></div><strong className={num(p.pnlPct) >= 0 ? 'green' : 'red'}>{pct(num(p.pnlPct))}</strong></div>) : <div className="empty">거래 기록 없음</div>)}
+    </section>
+  );
+
+  const recentTen = closedTrades.slice(0, 10);
+  const recentWinRate = recentTen.length ? (recentTen.filter((t) => num(t.pnlPct) > 0).length / recentTen.length) * 100 : 0;
+  const avgClosedPnl = closedTrades.length ? closedTrades.reduce((a, t) => a + num(t.pnlPct), 0) / closedTrades.length : 0;
+  const bestClosedPnl = closedTrades.length ? Math.max(...closedTrades.map((t) => num(t.pnlPct))) : 0;
+  const totalClosedPnl = closedTrades.reduce((a, t) => a + num(t.pnlMoney), 0);
+
+  const HistoryView = () => (
+    <section className="screen">
+      <h1>내 투자 기록</h1>
+      <div className="heroCard historyHero">
+        <div>
+          <span className="muted">청산 완료 거래 기준</span>
+          <h1>{closedTrades.length ? `${closedWinRate.toFixed(1)}%` : '-'} 승률</h1>
+          <p>랭킹 없이 내 모의투자 성과만 깔끔하게 봅니다.</p>
+        </div>
+      </div>
+      <div className="summaryGrid">
+        <div><span>총 거래수</span><b>{closedTrades.length}</b></div>
+        <div><span>평균수익</span><b className={avgClosedPnl >= 0 ? 'green' : 'red'}>{closedTrades.length ? pct(avgClosedPnl) : '-'}</b></div>
+        <div><span>최근10회</span><b>{recentTen.length ? `${recentWinRate.toFixed(1)}%` : '-'}</b></div>
+      </div>
+      <div className="summaryGrid">
+        <div><span>현재 보유</span><b>{activeTrades.length}</b></div>
+        <div><span>대기 주문</span><b>{pendingTrades.length}</b></div>
+        <div><span>누적손익</span><b className={totalClosedPnl >= 0 ? 'green' : 'red'}>{totalClosedPnl >= 0 ? '+' : ''}{totalClosedPnl.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b></div>
+      </div>
+      <h2>📜 청산 기록</h2>
+      {closedTrades.length ? closedTrades.map((p) => <div key={p.id} className="historyLine"><div><b>{p.name}</b><span>{p.symbol} · {categoryName(p.category)} · {p.side}</span></div><strong className={num(p.pnlPct) >= 0 ? 'green' : 'red'}>{pct(num(p.pnlPct))}</strong></div>) : <div className="empty">청산 기록 없음</div>}
+    </section>
+  );
+
+  return (
+    <main className="app">
+      <Header />
+      <div className="content">
+        {activeTab === 'PICKS' && PicksView()}
+        {activeTab === 'SEARCH' && SearchView()}
+        {activeTab === 'DETAIL' && DetailView()}
+        {activeTab === 'PAPER' && PaperView()}
+        {activeTab === 'HISTORY' && HistoryView()}
+      </div>
+      {showAuth && !user && (
+        <div className="authOverlay" onClick={() => setShowAuth(false)}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <button className="authClose" onClick={() => setShowAuth(false)}>×</button>
+            <AuthPanel />
           </div>
         </div>
+      )}
+      <BottomNav />
+      <style jsx>{`
+        :global(body){margin:0;background:#03070d;color:#eef4ff;font-family:Inter,Apple SD Gothic Neo,Segoe UI,Arial,sans-serif;}
+        :global(*){box-sizing:border-box;}
+        .app{min-height:100vh;background:radial-gradient(circle at 20% 0%,rgba(18,93,75,.35),transparent 34%),radial-gradient(circle at 95% 10%,rgba(26,44,71,.55),transparent 40%),#05080d;padding-bottom:92px;}
+        .content{width:100%;max-width:860px;margin:0 auto;padding:16px 14px 20px;}
+        .screen{animation:fade .18s ease;}@keyframes fade{from{opacity:.55;transform:translateY(5px)}to{opacity:1;transform:none}}
+        h1{font-size:26px;line-height:1.1;margin:4px 0 7px;letter-spacing:-.04em}h2{font-size:17px;margin:18px 0 10px}.muted,.hint{color:#9ca7b8;font-size:12px}.green{color:#20d58a}.red{color:#ff5454}.yellow{color:#f5c84b}
+        .topbar{position:sticky;top:0;z-index:80;display:flex;align-items:center;gap:10px;min-height:74px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.05);background:linear-gradient(180deg,rgba(3,7,13,.96),rgba(3,7,13,.72));backdrop-filter:blur(18px);}
+        .backBtn,.menuBtn{width:32px;height:42px;border:0;background:transparent;color:#eaf2ff;font-size:34px;line-height:1}.menuBtn{font-size:25px}.brand{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.brand b{font-size:24px;letter-spacing:-.04em}.brand em{display:block;color:#b9c2cf;font-style:normal;font-weight:700;font-size:14px}.brand span{color:#94a3b8;font-size:12px}.brand span i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#20d58a;margin-right:5px}.paperTop,.userBtn{border:1px solid rgba(32,213,138,.7);background:rgba(32,213,138,.08);color:#33e79a;border-radius:999px;padding:10px 14px;font-weight:900;white-space:nowrap}.userBtn{max-width:112px;overflow:hidden;text-overflow:ellipsis}.paperTop.big{padding:12px 15px}.miniSearch{display:none}
+        .heroCard,.detailHeader,.portfolioHero,.loginBox,.aiBox,.entryBox,.orderBox,.stockHero,.premiumBox{border:1px solid rgba(148,163,184,.15);background:linear-gradient(145deg,rgba(16,22,29,.94),rgba(8,12,17,.94));border-radius:22px;padding:16px;box-shadow:0 18px 42px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.04)}.heroCard,.portfolioHero,.detailHeader{display:flex;justify-content:space-between;gap:12px;align-items:center}.heroCard p{margin:0;color:#9fb0c7;font-size:13px;line-height:1.4}
+        .catTabs{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:12px 0}.catTabs button{border:1px solid rgba(148,163,184,.14);background:#101820;color:#d4deea;border-radius:15px;padding:11px 8px;font-weight:900}.catTabs button span{display:none}.catTabs .on{background:rgba(32,213,138,.13);border-color:rgba(32,213,138,.55);color:#20d58a}.listCards{display:grid;gap:10px}.stockCard{display:grid;grid-template-columns:38px 1fr auto;align-items:center;gap:10px;width:100%;text-align:left;border:1px solid rgba(148,163,184,.13);background:linear-gradient(145deg,rgba(16,22,29,.94),rgba(8,12,17,.94));border-radius:18px;padding:14px;color:#e5eefb;box-shadow:0 10px 28px rgba(0,0,0,.20)}.rankNo{width:30px;height:30px;border-radius:10px;background:rgba(32,213,138,.14);display:grid;place-items:center;color:#20d58a!important}.stockMain b{display:block;font-size:17px}.stockMain span,.stockNums span{display:block;color:#96a2b1;font-size:12px;margin-top:3px}.stockMain em{display:block;color:#b8c1ce;font-size:11px;font-style:normal;margin-top:4px}.stockNums{text-align:right}.stockNums b{color:#20d58a;font-size:22px}.searchInput{width:100%;border:1px solid rgba(148,163,184,.18);background:#09111a;color:white;border-radius:16px;padding:15px;font-size:16px;outline:none}.empty{border:1px dashed rgba(148,163,184,.24);border-radius:18px;padding:18px;text-align:center;color:#94a3b8;background:rgba(15,23,42,.38)}
+        .detailScreen{display:grid;gap:10px}.stockHero{display:grid;grid-template-columns:1fr 1.05fr;gap:12px;align-items:stretch}.heroLeft h1{font-size:30px;margin:0 0 10px}.heroLeft p{margin:0 0 18px;color:#9aa6b5;font-size:16px}.heroLeft em{display:block;color:#98a3b2;font-style:normal;margin-top:10px}.judgementRow{display:flex;align-items:center;gap:12px}.judgementRow span{border:1px solid rgba(32,213,138,.6);color:#20d58a;border-radius:10px;padding:7px 10px;font-weight:900}.judgementRow b{font-size:26px;color:#20d58a}.pricePanel{position:relative;border:1px solid rgba(148,163,184,.14);background:rgba(8,13,19,.72);border-radius:18px;padding:14px;min-height:138px;overflow:hidden}.pricePanel span{color:#a3adbb}.pricePanel b{display:block;font-size:24px;margin:8px 0}.pricePanel strong{font-size:15px}.spark{position:absolute;right:12px;bottom:12px;width:42%;height:72px;border-radius:14px;background:linear-gradient(180deg,rgba(32,213,138,.2),rgba(32,213,138,.03));overflow:hidden}.spark i{position:absolute;left:8px;right:8px;bottom:20px;height:3px;background:#20d58a;transform:skewY(-24deg);box-shadow:18px -14px 0 -1px #20d58a,38px -8px 0 -1px #20d58a,58px -24px 0 -1px #20d58a}
+        .actionStrip{display:flex;gap:10px;align-items:flex-start;border:1px solid rgba(32,213,138,.34);background:linear-gradient(135deg,rgba(32,213,138,.13),rgba(8,13,19,.84));border-radius:18px;padding:12px 14px;box-shadow:0 12px 28px rgba(0,0,0,.22)}.actionStrip span{flex:0 0 auto;color:#20d58a;font-size:12px;font-weight:1000;border:1px solid rgba(32,213,138,.45);border-radius:999px;padding:5px 8px}.actionStrip b{font-size:15px;line-height:1.45;color:#eef4ff;font-weight:900}
+        .metricGrid,.summaryGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0}.summaryGrid{grid-template-columns:repeat(3,1fr);margin:10px 0}.metricGrid div,.summaryGrid div{background:rgba(16,24,33,.8);border:1px solid rgba(148,163,184,.13);border-radius:15px;padding:13px}.metricGrid span,.summaryGrid span{display:block;color:#99a5b5;font-size:13px}.metricGrid b,.summaryGrid b{display:block;margin-top:6px;font-size:18px}.sectionTitle{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.sectionTitle:before{content:'';width:4px;height:24px;border-radius:99px;background:#20d58a;margin-right:10px}.sectionTitle b{font-size:19px;flex:1}.sectionTitle span{color:#aab4c2;font-size:13px}.entryMiniGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.entryMini{background:rgba(12,18,26,.9);border:1px solid rgba(148,163,184,.13);border-radius:15px;padding:13px}.entryMini span{display:block;color:#9ea9b8;font-size:13px}.entryMini b{display:block;margin:10px 0;color:#eef4ff;font-size:20px}.entryMini em{display:inline-block;background:rgba(32,213,138,.14);color:#20d58a;border-radius:8px;padding:5px 8px;font-size:12px;font-style:normal;font-weight:800}.compactOrder{padding-top:14px}.orderInputs{display:grid;grid-template-columns:1fr 1fr;gap:8px}.orderInputs label{font-size:12px;color:#94a3b8}.orderInputs input{width:100%;margin-top:5px;border:1px solid rgba(148,163,184,.18);background:#081120;color:white;border-radius:12px;padding:11px}.primary{width:100%;border:0;background:linear-gradient(135deg,#16a34a,#20d58a);color:#05110c;font-weight:1000;border-radius:14px;padding:13px;margin-top:10px}.analysisGrid,.pointGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.analysisGrid div,.pointGrid div{background:rgba(12,18,26,.82);border:1px solid rgba(148,163,184,.12);border-radius:15px;padding:13px}.analysisGrid span{display:inline-block;width:82px;color:#98a4b3;margin:6px 0}.analysisGrid b{font-weight:900}.pointGrid b{display:block;margin-bottom:10px}.pointGrid p{margin:0;color:#bbc5d3;line-height:1.62}.modelInfo{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;background:rgba(8,13,19,.62);border-radius:14px;padding:10px}.modelInfo span{text-align:center;color:#9aa6b5;font-size:12px}.modelInfo b{color:#dfe7f3;font-weight:700}
+        .holdCard,.pendingCard,.historyLine,.rankLine{border:1px solid rgba(148,163,184,.13);background:rgba(15,23,42,.82);border-radius:15px;padding:12px;margin-bottom:9px}.holdTop,.pendingCard,.historyLine,.rankLine{display:flex;justify-content:space-between;gap:10px;align-items:center}.holdTop span,.pendingCard span,.historyLine span,.rankLine span{display:block;color:#8da0b8;font-size:12px;margin-top:3px}.holdMetrics{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin:10px 0;color:#b8c4d6;font-size:13px}.holdActions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.sell,.buy,.pendingCard button{border:0;border-radius:12px;padding:10px;color:white;font-weight:900}.sell{background:#dc2626}.buy{background:#16a34a}.pendingCard button{background:#374151;padding:8px 12px}.loginBox{margin-bottom:12px}
+        .authOverlay{position:fixed;inset:0;z-index:250;display:grid;place-items:center;background:rgba(0,0,0,.62);backdrop-filter:blur(8px);padding:18px}.authOverlay>div{position:relative;width:min(420px,100%)}.authClose{position:absolute;right:12px;top:10px;z-index:2;width:34px;height:34px;border:0;border-radius:12px;background:rgba(255,255,255,.08);color:#eaf2ff;font-size:24px}.authPanel{border:1px solid rgba(148,163,184,.17);background:linear-gradient(145deg,rgba(16,22,29,.98),rgba(8,12,17,.98));border-radius:22px;padding:18px;box-shadow:0 24px 70px rgba(0,0,0,.55)}.authPanel.compact{margin-top:12px;padding:14px;box-shadow:none}.authInputs{display:grid;gap:9px}.authInputs input{width:100%;border:1px solid rgba(148,163,184,.2);background:#081120;color:white;border-radius:14px;padding:13px;font-size:15px;outline:none}.authActions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.authActions .primary{margin-top:0}.ghostBtn{border:1px solid rgba(148,163,184,.2);background:rgba(148,163,184,.08);color:#eaf2ff;font-weight:900;border-radius:14px;padding:13px}.authHint,.authMsg{margin:10px 0 0;color:#97a5b7;font-size:12px;line-height:1.45}.authMsg{color:#20d58a;font-weight:800}
+        .actionStrip.buy{border-color:rgba(32,213,138,.45);background:linear-gradient(135deg,rgba(32,213,138,.16),rgba(8,13,19,.86))}.actionStrip.buy span{color:#20d58a;border-color:rgba(32,213,138,.55)}
+        .actionStrip.wait{border-color:rgba(245,200,75,.35);background:linear-gradient(135deg,rgba(245,200,75,.12),rgba(8,13,19,.86))}.actionStrip.wait span{color:#f5c84b;border-color:rgba(245,200,75,.45)}
+        .actionStrip.danger{border-color:rgba(255,84,84,.38);background:linear-gradient(135deg,rgba(255,84,84,.12),rgba(8,13,19,.86))}.actionStrip.danger span{color:#ff5454;border-color:rgba(255,84,84,.45)}
+        .paperDashboard{margin:10px 0 12px}.performanceHero{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}.performanceHero div{background:linear-gradient(145deg,rgba(13,20,28,.95),rgba(7,11,16,.95));border:1px solid rgba(148,163,184,.13);border-radius:16px;padding:14px}.performanceHero span{display:block;color:#9ba7b6;font-size:12px}.performanceHero b{display:block;margin-top:5px;font-size:25px;letter-spacing:-.04em}.performanceHero em{display:block;margin-top:5px;color:#8793a4;font-style:normal;font-size:11px}.paperSummary{grid-template-columns:repeat(4,1fr)!important}.paperSummary div{padding:10px 8px}.paperSummary b{font-size:15px!important}
+        .bottomNav{position:fixed;left:0;right:0;bottom:0;z-index:100;height:76px;background:rgba(6,10,15,.93);backdrop-filter:blur(18px);border-top:1px solid rgba(148,163,184,.13);display:grid;grid-template-columns:repeat(5,1fr);padding:7px 8px 8px}.bottomNav button{border:0;background:transparent;color:#9ba6b4;border-radius:16px;font-size:25px;font-weight:800}.bottomNav span{display:block;font-size:11px;margin-top:2px}.bottomNav .on{color:#20d58a;background:rgba(32,213,138,.10)}
 
-        <div className="list">
-          <div className="card"><h2>⭐ 관심종목</h2>{watchlist.length ? watchlist.map((s) => (<div key={`watch-${s.market}-${s.symbol}`} className="item good" style={{ marginBottom: 8, cursor: 'pointer' }} onClick={() => selectStock(s)}><b>{s.name} · {s.symbol}</b><span className="muted">{s.grade ?? 'C'} Grade · 점수 {s.score}점 · 목표가 {fmt(s.target_price, s.market)}</span></div>)) : stocks.slice(0, 3).map((s) => (<div key={`watch-auto-${s.market}-${s.symbol}`} className="item good" style={{ marginBottom: 8 }}><b>{s.name} · {s.symbol}</b><span className="muted">추천 관심 · {s.grade ?? 'C'} Grade · 점수 {s.score}점</span></div>))}</div>
-          <ScoreBreakdown stock={sel} />
-          <div className="card"><h2>📰 뉴스 요약</h2>{stocks.slice(0, 3).map((s) => (<div className="item" key={`news-${s.market}-${s.symbol}`} style={{ marginBottom: 8 }}><b>{s.name} · {s.symbol}</b><span className="muted">{s.reason || '뉴스/실적/추세 데이터 분석 중'}</span></div>))}</div>
-          <div className="card"><h2>🚨 위험경고</h2><div className="item warn"><b>{stocks.filter((s) => getSignal(s).tone === 'danger').length}개 종목 매수금지</b><span className="muted">급등/손익비 부족/목표가 근접 종목은 초보자 모드에서 자동 제외됩니다.</span></div><div className="item good" style={{ marginTop: 8 }}><b>{stocks.filter((s) => getSignal(s).tone === 'hot' || getSignal(s).tone === 'good').length}개 종목 진입 후보</b><span className="muted">점수뿐 아니라 손익비와 진입가 괴리를 함께 통과한 종목입니다.</span></div></div>
-          <PortfolioPanel stocks={stocks} fmt={fmt} />
-          <div className="card chart-card"><h2>📈 차트 & 매매 플랜</h2><ChartPanel stock={sel} fmt={fmt} /></div>
-        </div>
-      </section>
-
-      <div className="footer">Alpha Radar AI v3.5 · 투자 참고용이며 매수/매도 책임은 사용자에게 있습니다.</div>
+        .searchScreen{padding-bottom:96px}.searchInput{position:sticky;top:70px;z-index:20;box-shadow:0 14px 30px rgba(0,0,0,.35)}.searchResults{margin-top:10px}
+        @media (min-width:760px){.content{max-width:430px}.screen{max-width:430px;margin:0 auto}.metricGrid{grid-template-columns:repeat(2,1fr)}.bottomNav{max-width:430px;left:50%;transform:translateX(-50%);bottom:12px;border-radius:24px;border:1px solid rgba(148,163,184,.16);box-shadow:0 16px 40px rgba(0,0,0,.5)}}
+        @media (max-width:480px){.actionStrip{padding:10px 11px;border-radius:15px}.actionStrip span{font-size:11px;padding:4px 7px}.actionStrip b{font-size:13px;line-height:1.35}}
+        @media (max-width:480px){.content{padding:12px 10px 18px}.topbar{gap:6px;min-height:68px;padding:10px}.brand b{font-size:21px}.brand em{font-size:13px}.brand span{font-size:11px}.paperTop,.userBtn{padding:8px 11px;font-size:12px}.menuBtn{width:28px}.stockHero{grid-template-columns:1fr}.pricePanel{min-height:104px}.spark{height:58px}.heroLeft h1{font-size:25px}.heroLeft p{font-size:14px;margin-bottom:12px}.judgementRow b{font-size:22px}.premiumMetrics{grid-template-columns:repeat(4,1fr);gap:6px}.metricGrid div{padding:10px 8px}.metricGrid span{font-size:11px}.metricGrid b{font-size:15px}.entryMiniGrid{grid-template-columns:repeat(3,1fr);gap:6px}.entryMini{padding:10px 8px}.entryMini span{font-size:11px}.entryMini b{font-size:16px}.analysisGrid,.pointGrid{grid-template-columns:1fr}.modelInfo{grid-template-columns:1fr 1fr 1fr}.catTabs{grid-template-columns:repeat(2,1fr)}.holdMetrics{grid-template-columns:1fr}.performanceHero{grid-template-columns:1fr 1fr}.performanceHero b{font-size:20px}.paperSummary{grid-template-columns:repeat(2,1fr)!important}.bottomNav{height:74px}.bottomNav button{font-size:23px}.bottomNav span{font-size:10px}}
+      `}</style>
     </main>
   );
 }
