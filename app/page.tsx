@@ -78,6 +78,23 @@ type LeaderboardRow = {
   total_pnl?: number;
 };
 
+type HotNews = {
+  id?: string | number;
+  symbol: string;
+  name?: string;
+  market?: string;
+  title: string;
+  summary?: string;
+  url?: string;
+  source?: string;
+  published_at?: string;
+  created_at?: string;
+  sentiment?: 'positive' | 'negative' | 'neutral' | string;
+  hot_score?: number;
+  matched_keywords?: string;
+  related_symbols?: string;
+};
+
 const demo: Stock[] = [
   {
     symbol: 'NVDA', name: '엔비디아', market: 'US', score: 92, grade: 'S', price: 135.68,
@@ -321,13 +338,21 @@ export default function Page() {
   const [authPassword, setAuthPassword] = useState('');
   const [authMessage, setAuthMessage] = useState('');
   const [showAuth, setShowAuth] = useState(false);
+  const [showInstallHelp, setShowInstallHelp] = useState(false);
   const [paperMode, setPaperMode] = useState<'HOLD' | 'PENDING' | 'CLOSED'>('HOLD');
+  const [hotNews, setHotNews] = useState<HotNews[]>([]);
+  const [newsOpen, setNewsOpen] = useState(false);
+  const [selectedNews, setSelectedNews] = useState<HotNews | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   const selectedEntry = num(String(paperEntry).replace(/,/g, ''), num(sel.entry_price, sel.price));
   const selectedQty = num(String(paperQty).replace(/,/g, ''), 1);
   const selectedCategory = getCategory(sel);
   const entryGuide = getEntryGuide(sel, selectedEntry);
+  const urgentNewsCount = useMemo(
+    () => hotNews.filter((n) => num(n.hot_score) >= 78 && n.sentiment !== 'neutral').length,
+    [hotNews]
+  );
 
   const upsertProfile = async (u: any) => {
     if (!hasSupabase || !supabase || !u) return;
@@ -590,6 +615,60 @@ export default function Page() {
 
       setMode(`Supabase 실시간 연결 · US ${nextCounts.US} / KR ${nextCounts.KR} / COIN ${nextCounts.COIN} / FUT ${nextCounts.FUTURES}`);
       setLastUpdated(new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }));
+
+      try {
+        const { data: newsRows, error: newsError } = await supabase
+          .from('hot_news')
+          .select('*')
+          .order('hot_score', { ascending: false })
+          .order('published_at', { ascending: false })
+          .limit(50);
+
+        if (newsError) throw newsError;
+        setHotNews((newsRows || []).map((n: any) => ({
+          id: n.id,
+          symbol: String(n.symbol ?? ''),
+          name: String(n.name ?? ''),
+          market: String(n.market ?? ''),
+          title: String(n.title ?? ''),
+          summary: String(n.summary ?? ''),
+          url: String(n.url ?? ''),
+          source: String(n.source ?? 'RSS'),
+          published_at: n.published_at,
+          created_at: n.created_at,
+          sentiment: n.sentiment ?? 'neutral',
+          hot_score: num(n.hot_score),
+          matched_keywords: String(n.matched_keywords ?? ''),
+          related_symbols: String(n.related_symbols ?? ''),
+        })));
+      } catch (newsError) {
+        const { data: fallbackAlerts } = await supabase
+          .from('alerts')
+          .select('*')
+          .in('level', ['news_good', 'news_bad', 'news_info'])
+          .order('created_at', { ascending: false })
+          .limit(30);
+
+        setHotNews((fallbackAlerts || []).map((a: any) => {
+          const msg = String(a.message ?? '');
+          const urlMatch = msg.match(/원문:\s*(https?:\/\/\S+)/);
+          return {
+            id: a.id,
+            symbol: String(a.symbol ?? ''),
+            name: String(a.symbol ?? ''),
+            title: String(a.title ?? ''),
+            summary: msg,
+            url: urlMatch?.[1] ?? '',
+            source: 'Alpha Alert',
+            published_at: a.created_at,
+            created_at: a.created_at,
+            sentiment: a.level === 'news_good' ? 'positive' : a.level === 'news_bad' ? 'negative' : 'neutral',
+            hot_score: 80,
+            matched_keywords: '',
+            related_symbols: String(a.symbol ?? ''),
+          };
+        }));
+      }
     }
 
     load(false);
@@ -756,6 +835,62 @@ export default function Page() {
       <button className={activeTab === 'PAPER' ? 'on paperNav' : 'paperNav'} onClick={() => setActiveTab('PAPER')}>◔{pendingTrades.length > 0 && <i className="navBadge">{pendingTrades.length}</i>}<span>모의투자</span></button>
       <button className={activeTab === 'HISTORY' ? 'on' : ''} onClick={() => setActiveTab('HISTORY')}>♙<span>마이페이지</span></button>
     </nav>
+  );
+
+  const newsTone = (n: HotNews) => {
+    if (n.sentiment === 'positive') return 'good';
+    if (n.sentiment === 'negative') return 'bad';
+    return 'info';
+  };
+
+  const newsLabel = (n: HotNews) => {
+    if (n.sentiment === 'positive') return '호재';
+    if (n.sentiment === 'negative') return '악재';
+    return '핫뉴스';
+  };
+
+  const newsTime = (n: HotNews) => {
+    const raw = n.published_at || n.created_at;
+    if (!raw) return '방금';
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return '방금';
+    return d.toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const NewsRail = () => (
+    <>
+      <button className={`newsRail ${newsOpen ? 'open' : ''}`} onClick={() => setNewsOpen((v) => !v)}>
+        <span>뉴스</span>
+        <b>{urgentNewsCount || hotNews.length}</b>
+      </button>
+      <aside className={`newsPanel ${newsOpen ? 'open' : ''}`}>
+        <div className="newsHead">
+          <div>
+            <b>🔥 핫 뉴스</b>
+            <span>무료 RSS 기반 · 호재/악재 빠른 감지</span>
+          </div>
+          <button onClick={() => setNewsOpen(false)}>×</button>
+        </div>
+        <div className="newsList">
+          {hotNews.length ? hotNews.map((n, i) => (
+            <button key={`${n.id ?? i}-${n.symbol}-${n.title}`} className={`newsCard ${newsTone(n)}`} onClick={() => setSelectedNews(n)}>
+              <div className="newsMeta">
+                <em>{newsLabel(n)}</em>
+                <span>{n.source || 'RSS'} · {newsTime(n)}</span>
+              </div>
+              <strong>{n.title}</strong>
+              <p>{n.summary || '자세한 내용은 탭해서 확인하세요.'}</p>
+              <div className="newsFoot">
+                <span>{n.name || n.symbol}</span>
+                <b>{num(n.hot_score)}점</b>
+              </div>
+            </button>
+          )) : (
+            <div className="empty newsEmpty">아직 표시할 핫뉴스가 없습니다.<br />엔진이 다음 스캔을 돌면 자동으로 채워집니다.</div>
+          )}
+        </div>
+      </aside>
+    </>
   );
 
   const StockCard = ({ s, i }: { s: Stock; i: number }) => {
@@ -939,6 +1074,9 @@ export default function Page() {
     <main className="app">
       <Header />
       <div className="content">
+        <button className="installTip" onClick={() => setShowInstallHelp(true)}>
+          📲 아이폰 홈 화면에 앱처럼 추가하기
+        </button>
         {activeTab === 'PICKS' && PicksView()}
         {activeTab === 'SEARCH' && SearchView()}
         {activeTab === 'DETAIL' && DetailView()}
@@ -953,6 +1091,40 @@ export default function Page() {
           </div>
         </div>
       )}
+      {showInstallHelp && (
+        <div className="authOverlay" onClick={() => setShowInstallHelp(false)}>
+          <div className="installSheet" onClick={(e) => e.stopPropagation()}>
+            <button className="authClose" onClick={() => setShowInstallHelp(false)}>×</button>
+            <h2>Alpha Radar를 앱처럼 설치</h2>
+            <p>아이폰 Safari에서 아래 순서대로 누르면 홈 화면에 앱 아이콘이 생기고, 다음부터는 주소창 없이 앱처럼 열립니다.</p>
+            <ol>
+              <li>Safari 하단의 <b>공유 버튼</b>을 누르기</li>
+              <li><b>홈 화면에 추가</b> 선택</li>
+              <li>이름을 Alpha Radar로 두고 <b>추가</b> 누르기</li>
+            </ol>
+            <p className="installWarn">카카오톡/문자 안의 미리보기 브라우저가 아니라 Safari로 열어야 가장 잘 됩니다.</p>
+          </div>
+        </div>
+      )}
+      <NewsRail />
+      {selectedNews && (
+        <div className="authOverlay" onClick={() => setSelectedNews(null)}>
+          <div className="newsDetail" onClick={(e) => e.stopPropagation()}>
+            <button className="authClose" onClick={() => setSelectedNews(null)}>×</button>
+            <div className={`newsDetailBadge ${newsTone(selectedNews)}`}>{newsLabel(selectedNews)} · {num(selectedNews.hot_score)}점</div>
+            <h2>{selectedNews.title}</h2>
+            <p>{selectedNews.summary || '요약 정보가 없습니다.'}</p>
+            <div className="newsDetailGrid">
+              <span>종목</span><b>{selectedNews.name || selectedNews.symbol}</b>
+              <span>출처</span><b>{selectedNews.source || 'RSS'}</b>
+              <span>시간</span><b>{newsTime(selectedNews)}</b>
+              <span>연관</span><b>{selectedNews.related_symbols || selectedNews.symbol}</b>
+            </div>
+            {selectedNews.matched_keywords && <p className="newsKeywords">감지 키워드: {selectedNews.matched_keywords}</p>}
+            {selectedNews.url && <a className="newsOriginal" href={selectedNews.url} target="_blank" rel="noreferrer">원문 뉴스 열기</a>}
+          </div>
+        </div>
+      )}
       <BottomNav />
       <style jsx>{`
         :global(body){margin:0;background:#03070d;color:#eef4ff;font-family:Inter,Apple SD Gothic Neo,Segoe UI,Arial,sans-serif;}
@@ -963,6 +1135,9 @@ export default function Page() {
         h1{font-size:26px;line-height:1.1;margin:4px 0 7px;letter-spacing:-.04em}h2{font-size:17px;margin:18px 0 10px}.muted,.hint{color:#9ca7b8;font-size:12px}.green{color:#20d58a}.red{color:#ff5454}.yellow{color:#f5c84b}
         .topbar{position:sticky;top:0;z-index:80;display:flex;align-items:center;gap:10px;min-height:74px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.05);background:linear-gradient(180deg,rgba(3,7,13,.96),rgba(3,7,13,.72));backdrop-filter:blur(18px);}
         .backBtn,.menuBtn{width:32px;height:42px;border:0;background:transparent;color:#eaf2ff;font-size:34px;line-height:1}.menuBtn{font-size:25px}.brand{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.brand b{font-size:24px;letter-spacing:-.04em}.brand em{display:block;color:#b9c2cf;font-style:normal;font-weight:700;font-size:14px}.brand span{color:#94a3b8;font-size:12px}.brand span i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#20d58a;margin-right:5px}.paperTop,.userBtn{border:1px solid rgba(32,213,138,.7);background:rgba(32,213,138,.08);color:#33e79a;border-radius:999px;padding:10px 14px;font-weight:900;white-space:nowrap}.userBtn{max-width:112px;overflow:hidden;text-overflow:ellipsis}.paperTop.big{padding:12px 15px}.miniSearch{display:none}
+        .installTip{width:100%;border:1px solid rgba(56,189,248,.32);background:linear-gradient(135deg,rgba(32,213,138,.12),rgba(56,189,248,.10));color:#dffcff;border-radius:17px;padding:12px 14px;margin:0 0 12px;font-weight:950;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+        .installSheet{position:relative;width:min(92vw,420px);border:1px solid rgba(148,163,184,.18);background:linear-gradient(145deg,#101827,#050914);border-radius:24px;padding:22px;color:#eaf2ff;box-shadow:0 30px 80px rgba(0,0,0,.55)}
+        .installSheet h2{margin:0 0 10px;font-size:24px}.installSheet p{margin:0 0 14px;color:#aebacc;line-height:1.55}.installSheet ol{margin:10px 0 14px;padding-left:22px}.installSheet li{margin:9px 0;color:#edf7ff}.installSheet b{color:#20d58a}.installWarn{border:1px solid rgba(250,204,21,.22);background:rgba(250,204,21,.08);border-radius:14px;padding:12px;color:#ffe9a6!important}
         .heroCard,.detailHeader,.portfolioHero,.loginBox,.aiBox,.entryBox,.orderBox,.stockHero,.premiumBox{border:1px solid rgba(148,163,184,.15);background:linear-gradient(145deg,rgba(16,22,29,.94),rgba(8,12,17,.94));border-radius:22px;padding:16px;box-shadow:0 18px 42px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.04)}.heroCard,.portfolioHero,.detailHeader{display:flex;justify-content:space-between;gap:12px;align-items:center}.heroCard p{margin:0;color:#9fb0c7;font-size:13px;line-height:1.4}
         .catTabs{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:12px 0}.catTabs button{border:1px solid rgba(148,163,184,.14);background:#101820;color:#d4deea;border-radius:15px;padding:11px 8px;font-weight:900}.catTabs button span{display:none}.catTabs .on{background:rgba(32,213,138,.13);border-color:rgba(32,213,138,.55);color:#20d58a}.listCards{display:grid;gap:10px}.stockCard{display:grid;grid-template-columns:38px 1fr auto;align-items:center;gap:10px;width:100%;text-align:left;border:1px solid rgba(148,163,184,.13);background:linear-gradient(145deg,rgba(16,22,29,.94),rgba(8,12,17,.94));border-radius:18px;padding:14px;color:#e5eefb;box-shadow:0 10px 28px rgba(0,0,0,.20)}.rankNo{width:30px;height:30px;border-radius:10px;background:rgba(32,213,138,.14);display:grid;place-items:center;color:#20d58a!important}.stockMain b{display:block;font-size:17px}.stockMain span,.stockNums span{display:block;color:#96a2b1;font-size:12px;margin-top:3px}.stockMain em{display:block;color:#b8c1ce;font-size:11px;font-style:normal;margin-top:4px}.stockNums{text-align:right}.stockNums b{color:#20d58a;font-size:22px}.searchInput{width:100%;border:1px solid rgba(148,163,184,.18);background:#09111a;color:white;border-radius:16px;padding:15px;font-size:16px;outline:none}.empty{border:1px dashed rgba(148,163,184,.24);border-radius:18px;padding:18px;text-align:center;color:#94a3b8;background:rgba(15,23,42,.38)}
         .detailScreen{display:grid;gap:10px}.stockHero{display:grid;grid-template-columns:1fr 1.05fr;gap:12px;align-items:stretch}.heroLeft h1{font-size:30px;margin:0 0 10px}.heroLeft p{margin:0 0 18px;color:#9aa6b5;font-size:16px}.heroLeft em{display:block;color:#98a3b2;font-style:normal;margin-top:10px}.judgementRow{display:flex;align-items:center;gap:12px}.judgementRow span{border:1px solid rgba(32,213,138,.6);color:#20d58a;border-radius:10px;padding:7px 10px;font-weight:900}.judgementRow b{font-size:26px;color:#20d58a}.pricePanel{position:relative;border:1px solid rgba(148,163,184,.14);background:rgba(8,13,19,.72);border-radius:18px;padding:14px;min-height:138px;overflow:hidden}.pricePanel span{color:#a3adbb}.pricePanel b{display:block;font-size:24px;margin:8px 0}.pricePanel strong{font-size:15px}.spark{position:absolute;right:12px;bottom:12px;width:42%;height:72px;border-radius:14px;background:linear-gradient(180deg,rgba(32,213,138,.2),rgba(32,213,138,.03));overflow:hidden}.spark i{position:absolute;left:8px;right:8px;bottom:20px;height:3px;background:#20d58a;transform:skewY(-24deg);box-shadow:18px -14px 0 -1px #20d58a,38px -8px 0 -1px #20d58a,58px -24px 0 -1px #20d58a}
@@ -975,10 +1150,13 @@ export default function Page() {
         .actionStrip.danger{border-color:rgba(255,84,84,.38);background:linear-gradient(135deg,rgba(255,84,84,.12),rgba(8,13,19,.86))}.actionStrip.danger span{color:#ff5454;border-color:rgba(255,84,84,.45)}
         .paperDashboard{margin:10px 0 12px}.performanceHero{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}.performanceHero div{background:linear-gradient(145deg,rgba(13,20,28,.95),rgba(7,11,16,.95));border:1px solid rgba(148,163,184,.13);border-radius:16px;padding:14px}.performanceHero span{display:block;color:#9ba7b6;font-size:12px}.performanceHero b{display:block;margin-top:5px;font-size:25px;letter-spacing:-.04em}.performanceHero em{display:block;margin-top:5px;color:#8793a4;font-style:normal;font-size:11px}.paperSummary{grid-template-columns:repeat(4,1fr)!important}.paperSummary div{padding:10px 8px}.paperSummary b{font-size:15px!important}
         .bottomNav{position:fixed;left:0;right:0;bottom:0;z-index:100;height:76px;background:rgba(6,10,15,.93);backdrop-filter:blur(18px);border-top:1px solid rgba(148,163,184,.13);display:grid;grid-template-columns:repeat(5,1fr);padding:7px 8px 8px}.bottomNav button{border:0;background:transparent;color:#9ba6b4;border-radius:16px;font-size:25px;font-weight:800}.bottomNav span{display:block;font-size:11px;margin-top:2px}.bottomNav .on{color:#20d58a;background:rgba(32,213,138,.10)}
+        .newsRail{position:fixed;right:10px;top:46%;z-index:130;display:grid;place-items:center;gap:4px;width:54px;height:74px;border:1px solid rgba(56,189,248,.45);border-radius:20px;background:linear-gradient(160deg,rgba(14,165,233,.92),rgba(32,213,138,.88));color:#031017;box-shadow:0 18px 45px rgba(0,0,0,.45);font-weight:1000;transform:translateY(-50%)}.newsRail span{writing-mode:vertical-rl;letter-spacing:.08em;font-size:13px}.newsRail b{min-width:24px;height:24px;border-radius:999px;background:#031017;color:#5eead4;display:grid;place-items:center;font-size:12px}.newsRail.open{right:min(392px,calc(92vw + 8px));background:linear-gradient(160deg,#facc15,#fb923c)}
+        .newsPanel{position:fixed;right:0;top:0;bottom:0;z-index:125;width:min(390px,92vw);padding:16px 14px 96px;background:linear-gradient(180deg,rgba(5,10,18,.98),rgba(3,7,13,.96));border-left:1px solid rgba(148,163,184,.16);box-shadow:-24px 0 70px rgba(0,0,0,.52);transform:translateX(104%);transition:transform .22s ease;overflow:auto}.newsPanel.open{transform:translateX(0)}.newsHead{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin:-16px -14px 12px;padding:16px 14px 12px;background:linear-gradient(180deg,rgba(5,10,18,.98),rgba(5,10,18,.82));backdrop-filter:blur(14px);border-bottom:1px solid rgba(148,163,184,.12)}.newsHead b{display:block;font-size:22px}.newsHead span{display:block;color:#93a4ba;font-size:12px;margin-top:4px}.newsHead button{width:34px;height:34px;border:0;border-radius:12px;background:rgba(255,255,255,.08);color:#eaf2ff;font-size:22px}.newsList{display:grid;gap:10px}.newsCard{width:100%;text-align:left;border:1px solid rgba(148,163,184,.14);background:rgba(15,23,42,.86);color:#eaf2ff;border-radius:18px;padding:13px;box-shadow:0 12px 30px rgba(0,0,0,.24)}.newsCard.good{border-color:rgba(32,213,138,.34);background:linear-gradient(145deg,rgba(20,83,45,.34),rgba(15,23,42,.9))}.newsCard.bad{border-color:rgba(248,113,113,.38);background:linear-gradient(145deg,rgba(127,29,29,.30),rgba(15,23,42,.9))}.newsMeta,.newsFoot{display:flex;align-items:center;justify-content:space-between;gap:8px}.newsMeta em{font-style:normal;font-size:11px;font-weight:1000;border-radius:999px;padding:5px 8px;background:rgba(56,189,248,.15);color:#7dd3fc}.newsCard.good .newsMeta em{background:rgba(32,213,138,.16);color:#5eea9e}.newsCard.bad .newsMeta em{background:rgba(248,113,113,.16);color:#fca5a5}.newsMeta span,.newsFoot span{color:#91a0b4;font-size:11px}.newsCard strong{display:block;margin:10px 0 7px;font-size:15px;line-height:1.35}.newsCard p{margin:0;color:#bac5d3;font-size:12px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.newsFoot{margin-top:10px}.newsFoot b{color:#20d58a}.newsEmpty{margin-top:10px}
+        .newsDetail{position:relative;width:min(92vw,440px);border:1px solid rgba(148,163,184,.18);background:linear-gradient(145deg,#101827,#050914);border-radius:24px;padding:22px;color:#eaf2ff;box-shadow:0 30px 80px rgba(0,0,0,.55)}.newsDetailBadge{display:inline-block;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:1000;background:rgba(56,189,248,.14);color:#7dd3fc}.newsDetailBadge.good{background:rgba(32,213,138,.16);color:#5eea9e}.newsDetailBadge.bad{background:rgba(248,113,113,.16);color:#fca5a5}.newsDetail h2{font-size:21px;line-height:1.35;margin:13px 0 10px}.newsDetail p{color:#bac5d3;line-height:1.6;margin:0 0 14px}.newsDetailGrid{display:grid;grid-template-columns:68px 1fr;gap:8px;border:1px solid rgba(148,163,184,.13);background:rgba(15,23,42,.7);border-radius:16px;padding:12px}.newsDetailGrid span{color:#8fa0b4}.newsDetailGrid b{font-weight:800}.newsKeywords{margin-top:12px!important;color:#f6d365!important;font-size:12px}.newsOriginal{display:block;text-align:center;margin-top:14px;border-radius:14px;padding:13px;background:linear-gradient(135deg,#16a34a,#20d58a);color:#03110b;text-decoration:none;font-weight:1000}
 
         .searchScreen{padding-bottom:96px}.searchInput{position:sticky;top:70px;z-index:20;box-shadow:0 14px 30px rgba(0,0,0,.35)}.searchResults{margin-top:10px}
         @media (min-width:760px){.content{max-width:430px}.screen{max-width:430px;margin:0 auto}.metricGrid{grid-template-columns:repeat(2,1fr)}.bottomNav{max-width:430px;left:50%;transform:translateX(-50%);bottom:12px;border-radius:24px;border:1px solid rgba(148,163,184,.16);box-shadow:0 16px 40px rgba(0,0,0,.5)}}
-        @media (max-width:480px){.actionStrip{padding:10px 11px;border-radius:15px}.actionStrip span{font-size:11px;padding:4px 7px}.actionStrip b{font-size:13px;line-height:1.35}}
+        @media (max-width:480px){.actionStrip{padding:10px 11px;border-radius:15px}.actionStrip span{font-size:11px;padding:4px 7px}.actionStrip b{font-size:13px;line-height:1.35}.newsRail{right:8px;width:48px;height:68px}.newsRail.open{right:calc(92vw + 6px)}}
         @media (max-width:480px){.content{padding:12px 10px 18px}.topbar{gap:6px;min-height:68px;padding:10px}.brand b{font-size:21px}.brand em{font-size:13px}.brand span{font-size:11px}.paperTop,.userBtn{padding:8px 11px;font-size:12px}.menuBtn{width:28px}.stockHero{grid-template-columns:1fr}.pricePanel{min-height:104px}.spark{height:58px}.heroLeft h1{font-size:25px}.heroLeft p{font-size:14px;margin-bottom:12px}.judgementRow b{font-size:22px}.premiumMetrics{grid-template-columns:repeat(4,1fr);gap:6px}.metricGrid div{padding:10px 8px}.metricGrid span{font-size:11px}.metricGrid b{font-size:15px}.entryMiniGrid{grid-template-columns:repeat(3,1fr);gap:6px}.entryMini{padding:10px 8px}.entryMini span{font-size:11px}.entryMini b{font-size:16px}.analysisGrid,.pointGrid{grid-template-columns:1fr}.modelInfo{grid-template-columns:1fr 1fr 1fr}.catTabs{grid-template-columns:repeat(2,1fr)}.holdMetrics{grid-template-columns:1fr}.performanceHero{grid-template-columns:1fr 1fr}.performanceHero b{font-size:20px}.paperSummary{grid-template-columns:repeat(2,1fr)!important}.bottomNav{height:74px}.bottomNav button{font-size:23px}.bottomNav span{font-size:10px}}
       `}</style>
     </main>

@@ -1,0 +1,16 @@
+{
+  "scan_interval_minutes": 10,
+  "max_share_price_usd": 1000,
+  "top_n": 120,
+  "push_alert_score": 90,
+  "markets": ["US", "KR", "CRYPTO", "FUTURES"],
+  "paper_trading_enabled": true,
+  "price_update_seconds": 20,
+  "price_update_limit": 80,
+  "hot_news_enabled": true,
+  "hot_news_max_items": 40,
+  "hot_news_alert_score": 78,
+  "hot_news_fetch_timeout": 4.0,
+  "hot_news_lookback_minutes": 720
+}
+

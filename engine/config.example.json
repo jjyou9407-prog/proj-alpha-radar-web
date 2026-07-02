@@ -1,0 +1,7 @@
+{
+  "scan_interval_minutes": 10,
+  "max_share_price_usd": 600,
+  "top_n": 20,
+  "push_alert_score": 90,
+  "markets": ["US", "KR"]
+}

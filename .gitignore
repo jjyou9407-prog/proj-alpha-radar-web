@@ -1,4 +1,10 @@
-node_modules/ 
-.next/ 
-.env* 
-.vercel
+node_modules/
+.next/
+.env*
+.vercel/
+ios/
+android/
+__pycache__/
+*.py[cod]
+*.bak_*
+*.zip

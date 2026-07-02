@@ -1,0 +1,52 @@
+{
+  "name": "Alpha Radar AI",
+  "short_name": "Alpha Radar",
+  "description": "AI stock, crypto and futures radar dashboard",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#030712",
+  "theme_color": "#030712",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "오늘의 후보",
+      "short_name": "후보",
+      "url": "/?tab=picks&source=shortcut",
+      "description": "오늘의 수익 후보 TOP10 보기"
+    },
+    {
+      "name": "검색",
+      "short_name": "검색",
+      "url": "/?tab=search&source=shortcut",
+      "description": "전체 종목 검색"
+    },
+    {
+      "name": "모의투자",
+      "short_name": "모의투자",
+      "url": "/?tab=paper&source=shortcut",
+      "description": "모의투자 현황 보기"
+    }
+  ]
+}
