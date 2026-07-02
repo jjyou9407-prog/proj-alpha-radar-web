@@ -10,7 +10,7 @@ const supabase = importedSupabase ?? (envSupabaseUrl && envSupabaseAnonKey ? cre
 const hasSupabase = Boolean(importedHasSupabase || supabase);
 
 type Category = 'US' | 'KR' | 'COIN' | 'FUTURES';
-type MainTab = 'PICKS' | 'SEARCH' | 'DETAIL' | 'PAPER' | 'HISTORY';
+type MainTab = 'PICKS' | 'SEARCH' | 'DETAIL' | 'NEWS' | 'PAPER' | 'HISTORY';
 type PaperStatus = 'PENDING' | 'FILLED' | 'CLOSED' | 'CANCELED';
 
 type Stock = {
@@ -850,11 +850,12 @@ export default function Page() {
 
   const BottomNav = () => (
     <nav className="bottomNav">
-      <button className={activeTab === 'PICKS' ? 'on' : ''} onClick={() => setActiveTab('PICKS')}>⌂<span>홈</span></button>
-      <button className={activeTab === 'SEARCH' ? 'on' : ''} onClick={() => { setActiveTab('SEARCH'); setTimeout(() => searchRef.current?.focus(), 120); }}>⌕<span>검색</span></button>
-      <button className={activeTab === 'DETAIL' ? 'on' : ''} onClick={() => setActiveTab('DETAIL')}>◇<span>상세</span></button>
-      <button className={activeTab === 'PAPER' ? 'on paperNav' : 'paperNav'} onClick={() => setActiveTab('PAPER')}>◔{pendingTrades.length > 0 && <i className="navBadge">{pendingTrades.length}</i>}<span>모의투자</span></button>
-      <button className={activeTab === 'HISTORY' ? 'on' : ''} onClick={() => setActiveTab('HISTORY')}>♙<span>마이페이지</span></button>
+      <button className={activeTab === 'PICKS' ? 'on' : ''} onClick={() => setActiveTab('PICKS')}>?<span>?</span></button>
+      <button className={activeTab === 'SEARCH' ? 'on' : ''} onClick={() => { setActiveTab('SEARCH'); setTimeout(() => searchRef.current?.focus(), 120); }}>?<span>??</span></button>
+      <button className={activeTab === 'DETAIL' ? 'on' : ''} onClick={() => setActiveTab('DETAIL')}>?<span>??</span></button>
+      <button className={activeTab === 'NEWS' ? 'on newsNav' : 'newsNav'} onClick={() => setActiveTab('NEWS')}>?{urgentNewsCount > 0 && <i className="navBadge">{urgentNewsCount}</i>}<span>??</span></button>
+      <button className={activeTab === 'PAPER' ? 'on paperNav' : 'paperNav'} onClick={() => setActiveTab('PAPER')}>?{pendingTrades.length > 0 && <i className="navBadge">{pendingTrades.length}</i>}<span>????</span></button>
+      <button className={activeTab === 'HISTORY' ? 'on' : ''} onClick={() => setActiveTab('HISTORY')}>?<span>?????</span></button>
     </nav>
   );
 
@@ -926,6 +927,33 @@ export default function Page() {
         </div>
       )}
     </>
+  );
+
+  const NewsView = () => (
+    <section className="screen newsScreen">
+      <div className="newsPageHero">
+        <span>Alpha Radar Hot News</span>
+        <h1>??? ??</h1>
+        <p>??/??? ? ?? ?? ??, ??? ??? ?? ??? ?????.</p>
+      </div>
+      <div className="newsRankList pageNewsList">
+        {hotNews.length ? hotNews.map((n, i) => (
+          <button key={`${n.id ?? i}-${n.symbol}-${n.title}`} className={`newsRankRow ${newsTone(n)}`} onClick={() => setSelectedNews(n)}>
+            <strong>{i + 1}</strong>
+            <div>
+              <div className="newsRankTop">
+                <em>{newsLabel(n)}</em>
+                <span>{newsTargetName(n)} ? {newsTime(n)}</span>
+              </div>
+              <b>{newsBrief(n)}</b>
+            </div>
+            <i>{num(n.hot_score)}?</i>
+          </button>
+        )) : (
+          <div className="empty newsEmpty">?? ??? ???? ????.<br />??? ?? ??? ?? ???? ?????.</div>
+        )}
+      </div>
+    </section>
   );
 
   const StockCard = ({ s, i }: { s: Stock; i: number }) => {
@@ -1115,6 +1143,7 @@ export default function Page() {
         {activeTab === 'PICKS' && PicksView()}
         {activeTab === 'SEARCH' && SearchView()}
         {activeTab === 'DETAIL' && DetailView()}
+        {activeTab === 'NEWS' && NewsView()}
         {activeTab === 'PAPER' && PaperView()}
         {activeTab === 'HISTORY' && HistoryView()}
       </div>
@@ -1141,7 +1170,6 @@ export default function Page() {
           </div>
         </div>
       )}
-      <NewsRail />
       {selectedNews && (
         <div className="authOverlay" onClick={() => setSelectedNews(null)}>
           <div className="newsDetail" onClick={(e) => e.stopPropagation()}>
@@ -1183,8 +1211,10 @@ export default function Page() {
         .actionStrip.buy{border-color:rgba(32,213,138,.45);background:linear-gradient(135deg,rgba(32,213,138,.16),rgba(8,13,19,.86))}.actionStrip.buy span{color:#20d58a;border-color:rgba(32,213,138,.55)}
         .actionStrip.wait{border-color:rgba(245,200,75,.35);background:linear-gradient(135deg,rgba(245,200,75,.12),rgba(8,13,19,.86))}.actionStrip.wait span{color:#f5c84b;border-color:rgba(245,200,75,.45)}
         .actionStrip.danger{border-color:rgba(255,84,84,.38);background:linear-gradient(135deg,rgba(255,84,84,.12),rgba(8,13,19,.86))}.actionStrip.danger span{color:#ff5454;border-color:rgba(255,84,84,.45)}
+
+        .newsPageHero{border:1px solid rgba(32,213,138,.22);background:linear-gradient(145deg,rgba(16,22,29,.96),rgba(8,12,17,.96));border-radius:22px;padding:17px;margin-bottom:12px}.newsPageHero span{display:block;color:#20d58a;font-size:12px;font-weight:1000}.newsPageHero h1{margin:5px 0 7px}.newsPageHero p{margin:0;color:#9fb0c7;font-size:13px;line-height:1.45}.pageNewsList{padding-bottom:96px}
         .paperDashboard{margin:10px 0 12px}.performanceHero{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}.performanceHero div{background:linear-gradient(145deg,rgba(13,20,28,.95),rgba(7,11,16,.95));border:1px solid rgba(148,163,184,.13);border-radius:16px;padding:14px}.performanceHero span{display:block;color:#9ba7b6;font-size:12px}.performanceHero b{display:block;margin-top:5px;font-size:25px;letter-spacing:-.04em}.performanceHero em{display:block;margin-top:5px;color:#8793a4;font-style:normal;font-size:11px}.paperSummary{grid-template-columns:repeat(4,1fr)!important}.paperSummary div{padding:10px 8px}.paperSummary b{font-size:15px!important}
-        .bottomNav{position:fixed;left:0;right:0;bottom:0;z-index:100;height:76px;background:rgba(6,10,15,.93);backdrop-filter:blur(18px);border-top:1px solid rgba(148,163,184,.13);display:grid;grid-template-columns:repeat(5,1fr);padding:7px 8px 8px}.bottomNav button{border:0;background:transparent;color:#9ba6b4;border-radius:16px;font-size:25px;font-weight:800}.bottomNav span{display:block;font-size:11px;margin-top:2px}.bottomNav .on{color:#20d58a;background:rgba(32,213,138,.10)}
+        .bottomNav{position:fixed;left:0;right:0;bottom:0;z-index:100;height:76px;background:rgba(6,10,15,.93);backdrop-filter:blur(18px);border-top:1px solid rgba(148,163,184,.13);display:grid;grid-template-columns:repeat(6,1fr);padding:7px 8px 8px}.bottomNav button{border:0;background:transparent;color:#9ba6b4;border-radius:16px;font-size:25px;font-weight:800}.bottomNav span{display:block;font-size:11px;margin-top:2px}.bottomNav .on{color:#20d58a;background:rgba(32,213,138,.10)}
         .newsDock{position:fixed;right:10px;top:50%;z-index:130;width:58px;min-height:92px;border:1px solid rgba(148,163,184,.20);border-radius:22px;background:rgba(6,10,15,.94);backdrop-filter:blur(18px);color:#9ba6b4;box-shadow:0 16px 40px rgba(0,0,0,.42);display:grid;place-items:center;gap:3px;padding:9px 6px;font-weight:900}.newsDock i{font-style:normal;font-size:21px}.newsDock span{font-size:11px}.newsDock b{min-width:24px;height:22px;border-radius:999px;background:rgba(32,213,138,.14);color:#20d58a;display:grid;place-items:center;font-size:11px}.newsDock:active{transform:scale(.97)}
         .newsOverlay{position:fixed;inset:0;z-index:240;background:rgba(0,0,0,.58);backdrop-filter:blur(8px);display:flex;justify-content:flex-end}.newsSheet{width:min(430px,100vw);height:100%;padding:16px 14px 98px;background:linear-gradient(180deg,#07111b,#03070d);border-left:1px solid rgba(148,163,184,.16);box-shadow:-24px 0 70px rgba(0,0,0,.54);overflow:auto;animation:slideNews .18s ease}@keyframes slideNews{from{transform:translateX(30px);opacity:.65}to{transform:none;opacity:1}}
         .newsHead2{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin:-16px -14px 12px;padding:18px 14px 13px;background:linear-gradient(180deg,rgba(7,17,27,.98),rgba(7,17,27,.86));backdrop-filter:blur(14px);border-bottom:1px solid rgba(148,163,184,.12)}.newsHead2 em{display:block;color:#20d58a;font-style:normal;font-size:11px;font-weight:1000;letter-spacing:.02em}.newsHead2 b{display:block;font-size:24px;letter-spacing:-.04em;margin-top:2px}.newsHead2 span{display:block;color:#94a3b8;font-size:12px;margin-top:5px}.newsHead2 button{width:38px;height:38px;border:0;border-radius:14px;background:rgba(255,255,255,.08);color:#eaf2ff;font-size:24px}.newsRankList{display:grid;gap:10px}
