@@ -20,6 +20,7 @@ import json
 import time
 import math
 import html
+import re
 import statistics
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
@@ -1953,8 +1954,11 @@ def _parse_rss_datetime(raw: str) -> datetime:
 
 def _clean_news_summary(text: str, max_len: int = 420) -> str:
     text = html.unescape(str(text or ""))
-    for token in ("<p>", "</p>", "<br>", "<br/>", "<br />", "<b>", "</b>"):
-        text = text.replace(token, " ")
+    text = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.I)
+    text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"https?://\S+", "", text)
+    text = text.replace("원문:", " ").replace("출처:", " ")
     text = " ".join(text.split())
     return text[:max_len] + ("..." if len(text) > max_len else "")
 
