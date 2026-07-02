@@ -151,7 +151,7 @@ function stripNewsText(raw?: string) {
 
 function shortText(raw: string, max = 74) {
   const clean = stripNewsText(raw);
-  return clean.length > max ? `${clean.slice(0, max - 1)}?` : clean;
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
 
 function getCategory(s: Stock): Category {
@@ -850,12 +850,12 @@ export default function Page() {
 
   const BottomNav = () => (
     <nav className="bottomNav">
-      <button className={activeTab === 'PICKS' ? 'on' : ''} onClick={() => setActiveTab('PICKS')}>?<span>?</span></button>
-      <button className={activeTab === 'SEARCH' ? 'on' : ''} onClick={() => { setActiveTab('SEARCH'); setTimeout(() => searchRef.current?.focus(), 120); }}>?<span>??</span></button>
-      <button className={activeTab === 'DETAIL' ? 'on' : ''} onClick={() => setActiveTab('DETAIL')}>?<span>??</span></button>
-      <button className={activeTab === 'NEWS' ? 'on newsNav' : 'newsNav'} onClick={() => setActiveTab('NEWS')}>?{urgentNewsCount > 0 && <i className="navBadge">{urgentNewsCount}</i>}<span>??</span></button>
-      <button className={activeTab === 'PAPER' ? 'on paperNav' : 'paperNav'} onClick={() => setActiveTab('PAPER')}>?{pendingTrades.length > 0 && <i className="navBadge">{pendingTrades.length}</i>}<span>????</span></button>
-      <button className={activeTab === 'HISTORY' ? 'on' : ''} onClick={() => setActiveTab('HISTORY')}>?<span>?????</span></button>
+      <button className={activeTab === 'PICKS' ? 'on' : ''} onClick={() => setActiveTab('PICKS')}>⌂<span>홈</span></button>
+      <button className={activeTab === 'SEARCH' ? 'on' : ''} onClick={() => { setActiveTab('SEARCH'); setTimeout(() => searchRef.current?.focus(), 120); }}>⌕<span>검색</span></button>
+      <button className={activeTab === 'DETAIL' ? 'on' : ''} onClick={() => setActiveTab('DETAIL')}>◇<span>상세</span></button>
+      <button className={activeTab === 'NEWS' ? 'on newsNav' : 'newsNav'} onClick={() => setActiveTab('NEWS')}>📰{urgentNewsCount > 0 && <i className="navBadge">{urgentNewsCount}</i>}<span>뉴스</span></button>
+      <button className={activeTab === 'PAPER' ? 'on paperNav' : 'paperNav'} onClick={() => setActiveTab('PAPER')}>◷{pendingTrades.length > 0 && <i className="navBadge">{pendingTrades.length}</i>}<span>모의투자</span></button>
+      <button className={activeTab === 'HISTORY' ? 'on' : ''} onClick={() => setActiveTab('HISTORY')}>♙<span>마이페이지</span></button>
     </nav>
   );
 
@@ -868,7 +868,7 @@ export default function Page() {
   const newsLabel = (n: HotNews) => {
     if (n.sentiment === 'positive') return '호재';
     if (n.sentiment === 'negative') return '악재';
-    return '핫뉴스';
+    return '뉴스';
   };
 
   const newsTime = (n: HotNews) => {
@@ -890,9 +890,9 @@ export default function Page() {
 
   const NewsRail = () => (
     <>
-      <button className="newsDock" onClick={() => setNewsOpen(true)} aria-label="?? ?? ??">
-        <i>??</i>
-        <span>??</span>
+      <button className="newsDock" onClick={() => setNewsOpen(true)} aria-label="핫뉴스 열기">
+        <i>📰</i>
+        <span>뉴스</span>
         <b>{urgentNewsCount || hotNews.length}</b>
       </button>
       {newsOpen && (
@@ -901,10 +901,10 @@ export default function Page() {
             <div className="newsHead2">
               <div>
                 <em>Alpha Radar</em>
-                <b>??? ??</b>
-                <span>??/??? ? ?? ?? ??, ??? ?? ??</span>
+                <b>핫뉴스 TOP</b>
+                <span>호재/악재를 빠르게 감지해서 순위로 보여줍니다</span>
               </div>
-              <button onClick={() => setNewsOpen(false)}>?</button>
+              <button onClick={() => setNewsOpen(false)}>×</button>
             </div>
             <div className="newsRankList">
               {hotNews.length ? hotNews.map((n, i) => (
@@ -913,14 +913,14 @@ export default function Page() {
                   <div>
                     <div className="newsRankTop">
                       <em>{newsLabel(n)}</em>
-                      <span>{newsTargetName(n)} ? {newsTime(n)}</span>
+                      <span>{newsTargetName(n)} · {newsTime(n)}</span>
                     </div>
                     <b>{newsBrief(n)}</b>
                   </div>
-                  <i>{num(n.hot_score)}?</i>
+                  <i>{num(n.hot_score)}점</i>
                 </button>
               )) : (
-                <div className="empty newsEmpty">?? ??? ???? ????.<br />??? ?? ??? ?? ???? ?????.</div>
+                <div className="empty newsEmpty">아직 감지된 핫뉴스가 없습니다.<br />새 뉴스가 들어오면 여기에 표시됩니다.</div>
               )}
             </div>
           </aside>
@@ -933,8 +933,8 @@ export default function Page() {
     <section className="screen newsScreen">
       <div className="newsPageHero">
         <span>Alpha Radar Hot News</span>
-        <h1>??? ??</h1>
-        <p>??/??? ? ?? ?? ??, ??? ??? ?? ??? ?????.</p>
+        <h1>핫뉴스 TOP</h1>
+        <p>호재/악재를 빠르게 감지해서 핵심 뉴스만 순위로 보여줍니다.</p>
       </div>
       <div className="newsRankList pageNewsList">
         {hotNews.length ? hotNews.map((n, i) => (
@@ -943,14 +943,14 @@ export default function Page() {
             <div>
               <div className="newsRankTop">
                 <em>{newsLabel(n)}</em>
-                <span>{newsTargetName(n)} ? {newsTime(n)}</span>
+                <span>{newsTargetName(n)} · {newsTime(n)}</span>
               </div>
               <b>{newsBrief(n)}</b>
             </div>
-            <i>{num(n.hot_score)}?</i>
+            <i>{num(n.hot_score)}점</i>
           </button>
         )) : (
-          <div className="empty newsEmpty">?? ??? ???? ????.<br />??? ?? ??? ?? ???? ?????.</div>
+          <div className="empty newsEmpty">아직 감지된 핫뉴스가 없습니다.<br />새 뉴스가 들어오면 여기에 표시됩니다.</div>
         )}
       </div>
     </section>
@@ -1187,7 +1187,7 @@ export default function Page() {
             {selectedNews.url && <a className="newsOriginal" href={selectedNews.url} target="_blank" rel="noreferrer">원문 뉴스 열기</a>}
           </div>
         </div>
-      )}
+      )}      <NewsRail />
       <BottomNav />
       <style jsx>{`
         :global(body){margin:0;background:#03070d;color:#eef4ff;font-family:Inter,Apple SD Gothic Neo,Segoe UI,Arial,sans-serif;}
