@@ -1,4 +1,4 @@
-const CACHE_NAME = 'alpha-radar-pwa-v3-news-dock';
+const CACHE_NAME = 'alpha-radar-pwa-v4-news-sidebar-clean';
 const STATIC_ASSETS = [
   '/',
   '/manifest.webmanifest',
